@@ -14,8 +14,9 @@ import (
 	"github.com/misakano7545/deveco2api-panel/internal/logfmt"
 )
 
-// appVersion 展示用版本号（与 Python 版一致）。
-const appVersion = "0.1.0"
+// appVersion 展示用版本号：本地构建为 dev，CI 用 -X main.appVersion=<版本> 注入
+// （与参考项目一致；注入要求它是 var，不能是 const）。
+var appVersion = "dev"
 
 func main() {
 	cfgPath := flag.String("config", "config.json", "配置文件路径")
