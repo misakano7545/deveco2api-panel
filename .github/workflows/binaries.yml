@@ -37,7 +37,7 @@ jobs:
               -o "$dir/deveco2api-panel$ext" ./cmd/server
             GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
               -o "$dir/deveco2api-login$ext" ./cmd/login
-            cp config.example.toml README.md "$dir/"
+            cp config.example.json README.md "$dir/"
           }
           for os in linux windows; do
             for arch in amd64 arm64; do

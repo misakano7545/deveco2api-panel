@@ -18,7 +18,7 @@ import (
 const appVersion = "0.1.0"
 
 func main() {
-	cfgPath := flag.String("config", "config.toml", "配置文件路径")
+	cfgPath := flag.String("config", "config.json", "配置文件路径")
 	host := flag.String("host", "", "监听 host（默认取配置 server.host）")
 	port := flag.Int("port", 0, "监听 port（默认取配置 server.port）")
 	loginOnly := flag.Bool("login", false, "仅确保登录有效（过期则交互登录）后退出")

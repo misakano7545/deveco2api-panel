@@ -6,7 +6,7 @@
 cmd/server/          网关二进制 deveco2api-panel（main.go 入口 + wiring.go 装配）
 cmd/login/           登录二进制 deveco2api-login（交互登录 / --relay 中继登录）
 internal/auth/       华为登录、回调收尾、token 刷新（Store 是唯一持有 token 的地方）
-internal/config/     config.toml 读写（两个二进制共用；与 Python 版格式兼容）
+internal/config/     config.json 读写（两个二进制共用；字段名与 Python 版 config.toml 同名）
 internal/httpauth/   Bearer 鉴权原语（常量时间比较，网关与面板同口径）
 internal/jsonval/    上游 JSON 取值 / 序列化 helper（nil 安全、不转义 HTML）
 internal/logfmt/     日志行格式 [HH:MM:SS][LEVEL] msg + 面板日志 sink
@@ -21,7 +21,7 @@ internal/upstream/   上游客户端：请求体构造、SSE 转发、思维链�
 
 - **与 Python 版（`deveco2api`）行为对齐**：协议路径、配置字段名、日志口径、状态码映射
   （限流 429 / 上游 4xx 沿用 / 其余 502）必须一致，两版可直接互换运行。
-- **internal 包不认识 config.toml**：依赖由 `cmd` 注入（`cmd/server/wiring.go`、`cmd/login`）。
+- **internal 包不认识 config.json**：依赖由 `cmd` 注入（`cmd/server/wiring.go`、`cmd/login`）。
   这样包的测试不需要配置文件，也不会因为配置项改动而连锁改包。
 - **出站只走 `internal/upstream`，登录只走 `internal/auth`**：`internal/server` 与
   `internal/panel` 不直接发华为请求。
@@ -42,5 +42,7 @@ go test ./internal/relay/  # 单包
 
 ## 配置与凭证
 
-`config.toml` 不入库（见 `.gitignore`），模板见 `config.example.toml`。凭证写在
-`[deveco.auth]`，由登录流程自动落盘（`config.SaveTokens` 原子写：tmp + rename）。
+`config.json` 不入库（见 `.gitignore`），模板见 `config.example.json`。凭证写在 `deveco.auth`，
+由登录流程自动落盘（`config.SaveTokens`：MarshalIndent → tmp（0600，文件含 token）→ rename）。
+字段名与 Python 版 `config.toml` 一一对应（`server.*` / `deveco.*` / `logging.*`），只是容器是 JSON，
+两版不再共用同一份文件——转换时把 section.key 拍平成同名 JSON 键即可。

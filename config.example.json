@@ -1,0 +1,31 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 10102,
+    "api_key": ""
+  },
+  "deveco": {
+    "base_url": "https://cn.devecostudio.huawei.com",
+    "auth_url": "console/DevEcoIDE/apply",
+    "temp_token_check_url": "authrouter/auth/api/temptoken/check",
+    "jwt_token_check_url": "authrouter/auth/api/jwToken/check",
+    "app_id": "1008",
+    "callback_port": 10101,
+    "model": "GLM-5.1",
+    "client": "cli",
+    "project": "global",
+    "user_agent": "deveco/0.2.0",
+    "keepalive_hours": 6.0,
+    "thinking_models": ["GLM-5.3"],
+    "auth": {
+      "jwt_token": "",
+      "access_token": "",
+      "refresh_token": "",
+      "user_id": "",
+      "user_name": ""
+    }
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}

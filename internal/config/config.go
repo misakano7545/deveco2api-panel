@@ -1,66 +1,72 @@
-// Package config config.toml 的读写（与 Python 版 / 上游格式完全兼容）。
+// Package config config.json 的读写（结构对齐 workbuddy2api-panel）。
 //
 // 单独成包而不是放在 cmd/server 里：网关（cmd/server）与登录（cmd/login）两个
 // 二进制读写同一份配置文件与同一份凭证，结构复制两份必然漂移。
+//
+// 字段名与 Python 版 config.toml 完全同名（server.host/api_key、deveco.*、logging.level），
+// 只是容器换成 JSON —— 两个实现不再共用同一份文件（Python 侧仍是 TOML），
+// 字段一一对应，转换是机械的：把 section.key 拍平成同名 JSON 键即可。
+//
+// 文件里有 access_token / jwt_token，落盘固定 0600、走 tmp + rename 原子替换。
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"sync"
 
-	"github.com/BurntSushi/toml"
 	"github.com/misakano7545/deveco2api-panel/internal/auth"
 )
 
-// AuthConfig 凭证段（[deveco.auth]）。
+// AuthConfig 凭证段。
 type AuthConfig struct {
-	JWTToken     string `toml:"jwt_token"`
-	AccessToken  string `toml:"access_token"`
-	RefreshToken string `toml:"refresh_token"`
-	UserID       string `toml:"user_id"`
-	UserName     string `toml:"user_name"`
+	JWTToken     string `json:"jwt_token"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	UserID       string `json:"user_id"`
+	UserName     string `json:"user_name"`
 }
 
-// DevEcoConfig 上游段（[deveco]）。
+// DevEcoConfig 上游段。
 type DevEcoConfig struct {
-	BaseURL           string     `toml:"base_url"`
-	AuthURL           string     `toml:"auth_url"`
-	TempTokenCheckURL string     `toml:"temp_token_check_url"`
-	JWTTokenCheckURL  string     `toml:"jwt_token_check_url"`
-	AppID             string     `toml:"app_id"`
-	CallbackPort      int        `toml:"callback_port"`
-	Model             string     `toml:"model"`
-	Client            string     `toml:"client"`
-	Project           string     `toml:"project"`
-	UserAgent         string     `toml:"user_agent"`
-	KeepaliveHours    float64    `toml:"keepalive_hours"`
-	ThinkingModels    []string   `toml:"thinking_models"`
-	Auth              AuthConfig `toml:"auth"`
+	BaseURL           string     `json:"base_url"`
+	AuthURL           string     `json:"auth_url"`
+	TempTokenCheckURL string     `json:"temp_token_check_url"`
+	JWTTokenCheckURL  string     `json:"jwt_token_check_url"`
+	AppID             string     `json:"app_id"`
+	CallbackPort      int        `json:"callback_port"`
+	Model             string     `json:"model"`
+	Client            string     `json:"client"`
+	Project           string     `json:"project"`
+	UserAgent         string     `json:"user_agent"`
+	KeepaliveHours    float64    `json:"keepalive_hours"`
+	ThinkingModels    []string   `json:"thinking_models"`
+	Auth              AuthConfig `json:"auth"`
 }
 
-// ServerConfig 网关监听与鉴权段（[server]）。
+// ServerConfig 网关监听与鉴权段。
 type ServerConfig struct {
-	Host   string `toml:"host"`
-	Port   int    `toml:"port"`
-	APIKey string `toml:"api_key"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	APIKey string `json:"api_key"`
 }
 
-// LoggingConfig 日志段（[logging]）。
+// LoggingConfig 日志段。
 type LoggingConfig struct {
-	Level string `toml:"level"`
+	Level string `json:"level"`
 }
 
 // Config 全量配置。path/mu 是运行期字段，不参与序列化。
 type Config struct {
-	Server  ServerConfig  `toml:"server"`
-	DevEco  DevEcoConfig  `toml:"deveco"`
-	Logging LoggingConfig `toml:"logging"`
+	Server  ServerConfig  `json:"server"`
+	DevEco  DevEcoConfig  `json:"deveco"`
+	Logging LoggingConfig `json:"logging"`
 
 	path string
 	mu   sync.Mutex
 }
 
-// Default 默认配置（配置文件缺项由它兜底）。
+// Default 默认配置（文件缺项由它兜底：JSON 未给出的键保持默认值）。
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{Host: "127.0.0.1", Port: 10102},
@@ -84,8 +90,12 @@ func Default() *Config {
 
 // Load 读取配置文件。
 func Load(path string) (*Config, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 	cfg := Default()
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
+	if err := json.Unmarshal(raw, cfg); err != nil {
 		return nil, err
 	}
 	cfg.path = path
@@ -119,23 +129,15 @@ func (c *Config) Tokens() auth.Tokens {
 	}
 }
 
-// Save 原子写回（tmp + rename），与 Python 版一致。
+// Save 原子写回：MarshalIndent(2 空格) → tmp(0600) → rename，与参考项目一致。
 func (c *Config) Save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	tmp := c.path + ".tmp"
-	f, err := os.Create(tmp)
+	out, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := toml.NewEncoder(f).Encode(c); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.path)
+	return writeAtomic(c.path, out)
 }
 
 // SaveTokens 更新凭证并落盘（auth.Store 的 save 回调）。
@@ -150,4 +152,23 @@ func (c *Config) SaveTokens(t auth.Tokens) error {
 	}
 	c.mu.Unlock()
 	return c.Save()
+}
+
+// writeAtomic 写临时文件（0600：文件里有 token）+ rename 替换。
+func writeAtomic(path string, data []byte) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }

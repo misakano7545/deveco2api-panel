@@ -23,7 +23,7 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "config.toml", "配置文件路径")
+	cfgPath := flag.String("config", "config.json", "配置文件路径")
 	relayMode := flag.Bool("relay", false, "无头/远程登录：起登录中继，浏览器（可经隧道）完成授权")
 	relayPort := flag.Int("relay-port", 8788, "登录中继监听端口（默认 8788）")
 	accessKey := flag.String("access-key", "", "登录中继访问口令（默认随机生成并打印）")

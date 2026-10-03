@@ -4,7 +4,7 @@
 自带内嵌 Web 控制台。
 
 - 单二进制、零运行时依赖（Go 标准库 + `github.com/BurntSushi/toml`）
-- 与 Python 版 `config.toml` 完全兼容：同一账号、同一格式，可直接替换运行
+- 配置文件 `config.json`（字段名与 Python 版 `config.toml` 一一对应，容器不同）
 - 目录结构对齐 `workbuddy2api-panel`：`cmd/` 放入口，`internal/<域>/` 放能力
 
 ## 目录结构
@@ -13,7 +13,7 @@
 cmd/server/          网关 deveco2api-panel（入口 + wiring 装配）
 cmd/login/           登录工具 deveco2api-login（交互登录 / --relay 中继）
 internal/auth/       华为登录、回调收尾、token 刷新
-internal/config/     config.toml 读写（两个二进制共用）
+internal/config/     config.json 读写（两个二进制共用）
 internal/httpauth/   Bearer 鉴权原语（常量时间，网关与面板同口径）
 internal/jsonval/    JSON 取值/序列化 helper
 internal/logfmt/     日志行格式 + 面板日志 sink
@@ -36,7 +36,7 @@ go build -o deveco2api-login ./cmd/login
 ## 运行
 
 ```bash
-./deveco2api-panel --config config.toml          # 默认 127.0.0.1:10102
+./deveco2api-panel --config config.json          # 默认 127.0.0.1:10102
 ./deveco2api-panel --port 10103 --no-browser     # 临时换端口
 ```
 
@@ -54,9 +54,9 @@ curl http://127.0.0.1:10102/v1/models -H "Authorization: Bearer <server.api_key>
 控制台与 `/v1/*` 共用 `server.api_key`（Bearer）；`api_key` 为空 = 不鉴权（仅本机/私网用法）。
 面板页面本身不含任何密钥，密钥只发给 `/panel/api/*`。
 
-配置项与 Python 版一致，见 `config.example.toml`：
+配置项与 Python 版一一对应，见 `config.example.json`：
 `deveco.keepalive_hours`（token 保活间隔，0=关）、`deveco.thinking_models`（流式思维链剥离清单）、
-`server.api_key`（本地 API 密钥）。token 由登录流程自动写入 `[deveco.auth]`。
+`server.api_key`（本地 API 密钥）。token 由登录流程自动写入 `deveco.auth`。
 
 ## 登录
 
@@ -91,7 +91,7 @@ ssh -L 10101:127.0.0.1:10101 <user>@<服务器>
 ```
 
 浏览器打开提示地址（含口令 `?k=...`）完成登录，回调由中继转发回服务器、token 自动写入
-`config.toml`；页面显示「全部完成」即可关闭。可用参数：`--access-key`（固定口令）、
+`config.json`；页面显示「全部完成」即可关闭。可用参数：`--access-key`（固定口令）、
 `--timeout`（等待秒数，默认 600）。
 
 ## 测试

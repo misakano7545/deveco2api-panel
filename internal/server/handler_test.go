@@ -204,7 +204,7 @@ func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours fl
 	cfg.DevEco.BaseURL = up.URL
 	cfg.DevEco.KeepaliveHours = keepaliveHours
 	cfg.DevEco.Auth = config.AuthConfig{JWTToken: "jwt-1", AccessToken: "old-token"}
-	cfg.SetPath(filepath.Join(t.TempDir(), "config.toml"))
+	cfg.SetPath(filepath.Join(t.TempDir(), "config.json"))
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
