@@ -15,8 +15,9 @@ cd "$(dirname "$0")/.."
 shim=$(mktemp -d)
 trap 'rm -rf "$shim"' EXIT
 
-if ! pkg-config --exists webkit2gtk-4.0; then
-  pc41=$(pkg-config --variable=pcfiledir webkit2gtk-4.1)
+# 只有 Linux 需要这层：macOS（WKWebView）/ Windows（WebView2）的 webview_go 不查 webkit2gtk
+if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists webkit2gtk-4.0; then
+  pc41=$(pkg-config --variable=pcfiledir webkit2gtk-4.1 2>/dev/null || true)
   if [ -z "$pc41" ]; then
     echo "缺少 WebKitGTK 开发库：apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev" >&2
     exit 1
