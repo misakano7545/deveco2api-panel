@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-gui.sh 构建内嵌 webview 版登录器（deveco2api-gui）。
+# build-gui.sh 构建内嵌 webview 版登录器（deveco2api-login-gui）。
 #
 # 为什么要这层壳：webview_go 的 cgo 指令写死 `pkg-config: gtk+-3.0 webkit2gtk-4.0`，
 # 而 Debian 13 / Ubuntu 24.04+ 只提供 webkit2gtk-4.1（4.0 开发包已从仓库移除）。
@@ -9,7 +9,7 @@
 # 用法：bash scripts/build-gui.sh [输出文件]
 set -euo pipefail
 
-out=${1:-deveco2api-gui}
+out=${1:-deveco2api-login-gui}
 cd "$(dirname "$0")/.."
 
 shim=$(mktemp -d)

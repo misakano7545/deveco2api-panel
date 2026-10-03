@@ -12,7 +12,7 @@
 ```
 cmd/server/          网关 deveco2api-panel（入口 + wiring 装配）
 cmd/login/           登录工具 deveco2api-login（交互登录 / --relay 中继）
-cmd/login-gui/       图形登录器 deveco2api-gui（与面板解耦，只产出凭证块）
+cmd/login-gui/       图形登录器 deveco2api-login-gui（与面板解耦，只产出凭证块）
 internal/auth/       华为登录、回调收尾、token 刷新
 internal/config/     config.json 读写（三个二进制共用）
 internal/httpauth/   Bearer 鉴权原语（常量时间，网关与面板同口径）
@@ -102,11 +102,11 @@ ssh -L 10101:127.0.0.1:10101 <user>@<服务器>
 然后**把凭证块粘到面板的「导入」页**。它跟面板完全解耦——不认识面板地址，也不向面板发请求。
 
 ```bash
-go build -tags webview -o deveco2api-gui ./cmd/login-gui   # 内嵌窗口（cgo + 系统 webview：WebView2/WKWebView/WebKitGTK）
-go build -o deveco2api-gui ./cmd/login-gui                  # 默认构建：改用系统浏览器，无 cgo 依赖
+go build -tags webview -o deveco2api-login-gui ./cmd/login-gui   # 内嵌窗口（cgo + 系统 webview：WebView2/WKWebView/WebKitGTK）
+go build -o deveco2api-login-gui ./cmd/login-gui                  # 默认构建：改用系统浏览器，无 cgo 依赖
 
-./deveco2api-gui --config config.json        # 这台就是服务器：登录后直接落盘
-./deveco2api-gui --out auth-block.json       # 服务器在别处：产出凭证块（0600）
+./deveco2api-login-gui --config config.json        # 这台就是服务器：登录后直接落盘
+./deveco2api-login-gui --out auth-block.json       # 服务器在别处：产出凭证块（0600）
 ```
 
 拿到凭证块后在服务器面板打开 **导入** 页，粘贴（JSON 或 base64 两种都收）→「导入并覆盖」。

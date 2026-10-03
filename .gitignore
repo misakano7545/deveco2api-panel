@@ -1,8 +1,8 @@
 # 构建产物
 deveco2api-panel
 deveco2api-login
-deveco2api-gui
-deveco2api-gui-webview
+deveco2api-login-gui
+deveco2api-login-gui-webview
 
 # 本地配置（含 token，勿入库）
 config.json

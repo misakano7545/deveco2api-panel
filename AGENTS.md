@@ -5,7 +5,7 @@
 ```
 cmd/server/          网关二进制 deveco2api-panel（main.go 入口 + wiring.go 装配）
 cmd/login/           登录二进制 deveco2api-login（交互登录 / --relay 中继登录）
-cmd/login-gui/       图形登录器 deveco2api-gui（内嵌 webview；与面板解耦，只产出凭证块）
+cmd/login-gui/       图形登录器 deveco2api-login-gui（内嵌 webview；与面板解耦，只产出凭证块）
 internal/auth/       华为登录、回调收尾、token 刷新（Store 是唯一持有 token 的地方）
 internal/config/     config.json 读写（三个二进制共用；字段名与 Python 版 config.toml 同名）
 internal/httpauth/   Bearer 鉴权原语（常量时间比较，网关与面板同口径）

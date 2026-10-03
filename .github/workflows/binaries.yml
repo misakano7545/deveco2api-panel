@@ -54,7 +54,7 @@ jobs:
               -o "$dir/deveco2api-login$ext" ./cmd/login
             # GUI 默认构建（无 webview tag）：用系统浏览器打开登录页，无 cgo 依赖
             GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-              -o "$dir/deveco2api-gui$ext" ./cmd/login-gui
+              -o "$dir/deveco2api-login-gui$ext" ./cmd/login-gui
             cp config.example.json README.md "$dir/"
             python3 -c 'import os,sys,zipfile;n,d=sys.argv[1:];z=zipfile.ZipFile(n,"w",zipfile.ZIP_DEFLATED);[z.write(os.path.join(d,f),f) for f in os.listdir(d)];z.close()' \
               "dist/deveco2api-${VERSION}-$1-$2.zip" "$dir"
@@ -90,15 +90,15 @@ jobs:
             arch: amd64
             deps: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev
             # Ubuntu 24.04 只有 webkit2gtk-4.1，脚本会补 4.0 的 pkg-config 别名
-            build: bash scripts/build-gui.sh dist/gui/deveco2api-gui
+            build: bash scripts/build-gui.sh dist/gui/deveco2api-login-gui
           - os: macos-latest
             arch: arm64
             deps: "true"
-            build: go build -tags webview -trimpath -ldflags="-s -w" -o dist/gui/deveco2api-gui ./cmd/login-gui
+            build: go build -tags webview -trimpath -ldflags="-s -w" -o dist/gui/deveco2api-login-gui ./cmd/login-gui
           - os: windows-latest
             arch: amd64
             deps: "true"
-            build: go build -tags webview -trimpath -ldflags="-s -w" -o dist/gui/deveco2api-gui.exe ./cmd/login-gui
+            build: go build -tags webview -trimpath -ldflags="-s -w" -o dist/gui/deveco2api-login-gui.exe ./cmd/login-gui
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -122,16 +122,16 @@ jobs:
         run: |
           set -euo pipefail
           python3 -c 'import os,sys,zipfile;n,d=sys.argv[1:];z=zipfile.ZipFile(n,"w",zipfile.ZIP_DEFLATED);[z.write(os.path.join(d,f),f) for f in os.listdir(d)];z.close()' \
-            "dist/deveco2api-gui-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip" dist/gui
+            "dist/deveco2api-login-gui-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip" dist/gui
         shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: gui-webview-${{ matrix.os }}
-          path: dist/deveco2api-gui-*.zip
+          path: dist/deveco2api-login-gui-*.zip
       # 追加到 core 建好的 Release（--clobber 保证重跑幂等）
       - name: release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v${VERSION}" dist/deveco2api-gui-*.zip --clobber
+        run: gh release upload "v${VERSION}" dist/deveco2api-login-gui-*.zip --clobber
         shell: bash
