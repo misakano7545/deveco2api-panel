@@ -3,6 +3,7 @@ package main
 // auth.go — 华为账号登录与 token 维护（对 auth.py 的逐行移植）。
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -210,8 +211,25 @@ type loginCallback struct {
 var callbackPorts = []int{10101, 34567, 34568, 34569, 34570}
 
 func (c *loginCallback) handle(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
-	get := func(k string) string { return r.Form.Get(k) }
+	// 兼容 GET 与任意 Content-Type 的表单体（与 Python 版 _collect_params 行为一致）
+	params := url.Values{}
+	for k, vs := range r.URL.Query() {
+		for _, v := range vs {
+			params.Set(k, v)
+		}
+	}
+	if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
+		if body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)); err == nil && len(bytes.TrimSpace(body)) > 0 {
+			if vals, err := url.ParseQuery(string(body)); err == nil {
+				for k, vs := range vals {
+					for _, v := range vs {
+						params.Set(k, v)
+					}
+				}
+			}
+		}
+	}
+	get := func(k string) string { return params.Get(k) }
 	code, tempToken, siteID, quit := get("code"), get("tempToken"), get("siteId"), get("quit")
 
 	if code != c.code {

@@ -16,14 +16,13 @@ func main() {
 	host := flag.String("host", "", "监听 host")
 	port := flag.Int("port", 0, "监听 port")
 	loginOnly := flag.Bool("login", false, "仅执行登录并保存 token")
-	loginRelay := flag.Bool("login-relay", false, "无头/远程登录（Go 版暂未移植）")
+	loginRelay := flag.Bool("login-relay", false, "无头/远程登录：启动登录中继，浏览器（可经隧道）完成授权")
+	relayPort := flag.Int("relay-port", 8788, "登录中继监听端口（默认 8788）")
+	accessKey := flag.String("access-key", "", "登录中继访问口令（默认随机生成并打印）")
+	tunnel := flag.Bool("tunnel", false, "自动启动 cloudflared 快速隧道并打印外网地址")
+	timeoutSec := flag.Int("timeout", 600, "等待浏览器回调超时秒数（默认 600）")
 	noBrowser := flag.Bool("no-browser", false, "登录时不自动打开浏览器")
 	flag.Parse()
-
-	if *loginRelay {
-		logError("Go 版暂未移植中继登录（--login-relay）：请用 Python 版，或使用 --login + ssh -L 隧道方式")
-		os.Exit(1)
-	}
 
 	abs, err := filepath.Abs(*cfgPath)
 	if err != nil {
@@ -37,7 +36,15 @@ func main() {
 	}
 	setLogLevel(cfg.Logging.Level)
 
-	access, err := ensureAuth(cfg, 10*time.Minute, *noBrowser)
+	if *loginRelay {
+		if err := loginViaRelay(cfg, abs, *relayPort, *accessKey, time.Duration(*timeoutSec)*time.Second, *tunnel); err != nil {
+			logError("登录失败: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	access, err := ensureAuth(cfg, time.Duration(*timeoutSec)*time.Second, *noBrowser)
 	if err != nil {
 		logError("认证失败: %v", err)
 		os.Exit(1)

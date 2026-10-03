@@ -474,6 +474,7 @@ func TestKeepaliveRefreshes(t *testing.T) {
 	_, srv, cfg := newTestServer(t, m)
 	cfg.DevEco.KeepaliveHours = 0.0003 // ≈1.08s
 	srv.startKeepalive()
+	defer srv.stopKeepalive()
 
 	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) {

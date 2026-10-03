@@ -60,6 +60,7 @@ type server struct {
 
 	// ponytail: 上游响应整包读完后一次性转发（与 Python 版行为一致；真流式是后续升级点）
 	upstream *http.Client
+	stop     chan struct{}
 }
 
 func newServer(cfg *Config, cfgPath string) *server {
@@ -68,6 +69,7 @@ func newServer(cfg *Config, cfgPath string) *server {
 		cfgPath:  cfgPath,
 		chatIDs:  map[string]string{},
 		upstream: &http.Client{Timeout: 300 * time.Second},
+		stop:     make(chan struct{}),
 	}
 }
 
@@ -150,10 +152,15 @@ func (s *server) startKeepalive() {
 		return
 	}
 	logInfo("token 保活已启用：每 %s 小时自动刷新一次", pyFloat(hours))
+	interval := time.Duration(hours * 3600 * float64(time.Second))
 	go func() {
 		fails := 0
 		for {
-			time.Sleep(time.Duration(hours * 3600 * float64(time.Second)))
+			select {
+			case <-s.stop:
+				return
+			case <-time.After(interval):
+			}
 			if s.refreshToken() {
 				fails = 0
 				logInfo("token 保活刷新成功")
@@ -168,6 +175,8 @@ func (s *server) startKeepalive() {
 		}
 	}()
 }
+
+func (s *server) stopKeepalive() { close(s.stop) }
 
 // ---------------------------------------------------------------- /v1/models
 
