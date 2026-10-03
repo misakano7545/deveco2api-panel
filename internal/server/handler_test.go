@@ -240,6 +240,14 @@ func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours fl
 		Auth:           store,
 		Upstream:       upc,
 		Logs:           ring,
+		// 与 cmd/server/wiring.go 同口径：导入 = 换内存 token + 落盘，回显旧身份
+		ImportAuth: func(t auth.Tokens) (auth.Tokens, error) {
+			prev := store.Tokens()
+			if err := store.Save(t); err != nil {
+				return auth.Tokens{}, err
+			}
+			return prev, nil
+		},
 	})
 
 	h := New(Config{

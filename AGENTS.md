@@ -5,8 +5,9 @@
 ```
 cmd/server/          网关二进制 deveco2api-panel（main.go 入口 + wiring.go 装配）
 cmd/login/           登录二进制 deveco2api-login（交互登录 / --relay 中继登录）
+cmd/login-gui/       图形登录器 deveco2api-gui（内嵌 webview；与面板解耦，只产出凭证块）
 internal/auth/       华为登录、回调收尾、token 刷新（Store 是唯一持有 token 的地方）
-internal/config/     config.json 读写（两个二进制共用；字段名与 Python 版 config.toml 同名）
+internal/config/     config.json 读写（三个二进制共用；字段名与 Python 版 config.toml 同名）
 internal/httpauth/   Bearer 鉴权原语（常量时间比较，网关与面板同口径）
 internal/jsonval/    上游 JSON 取值 / 序列化 helper（nil 安全、不转义 HTML）
 internal/logfmt/     日志行格式 [HH:MM:SS][LEVEL] msg + 面板日志 sink
@@ -25,7 +26,11 @@ internal/upstream/   上游客户端：请求体构造、SSE 转发、思维链�
   这样包的测试不需要配置文件，也不会因为配置项改动而连锁改包。
 - **出站只走 `internal/upstream`，登录只走 `internal/auth`**：`internal/server` 与
   `internal/panel` 不直接发华为请求。
-- **面板只读**：概览/模型/日志三个视图；登录、改配置等写操作走 CLI，不在页面里做。
+- **面板只有一个写入口**：概览/模型/日志是只读视图；「导入」页走 `POST /panel/api/import/config`，
+  只替换 auth 块（jwt/access/refresh/user_id/user_name）且立即生效。其余写操作（改配置、登录）
+  走 CLI / 登录器，不在页面里做。
+- **登录器与面板解耦**：`cmd/login-gui` 只产出凭证块（JSON 或 base64），不认识面板地址、
+  不向面板发任何请求；搬运由人手动粘贴（一次一个方向，不引入第二条第写路径）。
 - **日志一律 `logfmt.Infof/Warnf/Errorf`**：stdout 是持久出口，面板环形缓冲只是观测窗口
   （进程重启即空，不落盘）。
 

@@ -58,6 +58,14 @@ func wire(cfg *config.Config, cfgPath, listen string) *services {
 		Auth:           store,
 		Upstream:       up,
 		Logs:           ring,
+		// 导入 = 换内存 token（保活/请求立刻用新号）+ 落盘；返回被替换的旧身份给面板回显
+		ImportAuth: func(t auth.Tokens) (auth.Tokens, error) {
+			prev := store.Tokens()
+			if err := store.Save(t); err != nil {
+				return auth.Tokens{}, err
+			}
+			return prev, nil
+		},
 	})
 
 	return &services{

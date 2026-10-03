@@ -10,7 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # 网关 + 登录 CLI + 默认 GUI（浏览器回退版）：纯 Go，三平台交叉编译
+  core:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,9 +38,12 @@ jobs:
               -o "$dir/deveco2api-panel$ext" ./cmd/server
             GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
               -o "$dir/deveco2api-login$ext" ./cmd/login
+            # GUI 默认构建（无 webview tag）：用系统浏览器打开登录页，无 cgo 依赖
+            GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+              -o "$dir/deveco2api-gui$ext" ./cmd/login-gui
             cp config.example.json README.md "$dir/"
           }
-          for os in linux windows; do
+          for os in linux windows darwin; do
             for arch in amd64 arm64; do
               pack "$os" "$arch"
             done
@@ -47,7 +51,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries
+          name: core
           path: dist/**
 
       - name: release
@@ -55,3 +59,34 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/**
+
+  # 增量产物：内嵌 webview 版 GUI（-tags webview）。cgo 不能交叉编译，
+  # 只能在各自 runner 上原生构建：Linux 装 WebKitGTK，macOS 用 WKWebView，Windows 用 WebView2。
+  gui-webview:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            deps: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev
+            ext: ""
+          - os: macos-latest
+            deps: "true"
+            ext: ""
+          - os: windows-latest
+            deps: "true"
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: deps
+        run: ${{ matrix.deps }}
+      - name: build
+        run: go build -tags webview -trimpath -ldflags="-s -w" -o "deveco2api-gui${{ matrix.ext }}" ./cmd/login-gui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-webview-${{ matrix.os }}
+          path: deveco2api-gui*

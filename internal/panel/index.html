@@ -144,6 +144,14 @@ input:focus { outline: none; border-color: var(--accent); }
   #toasts { left: 12px; right: 12px; bottom: 14px; align-items: stretch; }
   .tst { max-width: none; }
 }
+
+/* 导入页：凭证块粘贴框（等宽、可换行） */
+.imp textarea { width: 100%; box-sizing: border-box; min-height: 130px; padding: 11px 13px; background: var(--surface-2);
+  color: var(--ink); border: 1px solid var(--line); border-radius: 9px;
+  font: 12.5px/1.55 var(--mono); resize: vertical; }
+.imp .row { display: flex; gap: 10px; align-items: center; margin-top: 11px; }
+.imp .row .grow { flex: 1; }
+.imp .tip { color: var(--ink-3); font-size: 12px; margin: 12px 0 0; }
 </style>
 </head>
 <body>
@@ -163,6 +171,9 @@ input:focus { outline: none; border-color: var(--accent); }
       <li><a href="#logs" data-view="logs">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h7"/></svg>
         日志</a></li>
+      <li><a href="#import" data-view="import">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 10.8V2.6M5.4 5.2 8 2.6l2.6 2.6"/><path d="M2.6 9.4v3.6h10.8V9.4"/></svg>
+        导入</a></li>
     </ul>
     <div class="sig">
       <div class="row"><span class="pulse" id="navPulse"></span><span id="navState">连接中</span></div>
@@ -228,6 +239,28 @@ input:focus { outline: none; border-color: var(--accent); }
           <button id="btnLogs">刷新</button>
         </header>
         <pre id="logBox"></pre>
+      </div>
+    </section>
+
+    <!-- 导入 -->
+    <section class="view imp" id="view-import" hidden>
+      <div class="box">
+        <header>
+          <h3>导入凭证 <span class="hint">登录器产出的凭证块（JSON 或 base64，两种都收）</span></h3>
+          <span class="grow"></span>
+          <span class="note" id="impNote">—</span>
+        </header>
+        <div class="pad">
+          <textarea id="impText" spellcheck="false" placeholder='{"auth":{"jwt_token":"…","access_token":"…","user_id":"…","user_name":"…"}}'></textarea>
+          <div class="row">
+            <input type="file" id="impFile" accept=".json,.txt,.b64" hidden>
+            <button id="btnImpFile">选择文件…</button>
+            <span class="grow"></span>
+            <button class="primary" id="btnImpGo">导入并覆盖</button>
+          </div>
+          <div class="state" id="impState" hidden></div>
+          <p class="tip">导入只替换账号凭证（jwt / access / refresh / user_id / user_name），不动服务配置；成功后立即生效并落盘，响应会回显被替换掉的旧账号。</p>
+        </div>
       </div>
     </section>
   </div>

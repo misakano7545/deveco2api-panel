@@ -83,7 +83,7 @@ function setConn(ok, text) {
 }
 
 // ── 视图切换
-const TITLES = { status: '概览', models: '模型', logs: '日志' };
+const TITLES = { status: '概览', models: '模型', logs: '日志', import: '导入' };
 function switchView(v) {
   view = v;
   document.querySelectorAll('.view').forEach((s) => { s.hidden = s.id !== 'view-' + v; });
@@ -95,6 +95,7 @@ function switchView(v) {
   if (v === 'status') { statusTimer = setInterval(loadStatus, 5000); }
   if (v === 'models') loadModels();
   if (v === 'logs') { loadLogs(); logsTimer = setInterval(loadLogs, 3000); }
+  if (v === 'import') loadCurrentAccount();
   closeNav();
 }
 document.querySelectorAll('.nav a').forEach((a) => {
@@ -220,6 +221,58 @@ async function loadLogs() {
 }
 $('btnLogs').onclick = loadLogs;
 $('btnLogPin').onclick = () => { logPin = !logPin; $('btnLogPin').textContent = '自动滚动：' + (logPin ? '开' : '关'); };
+
+// ── 导入（把登录器产出的凭证块粘进来；面板唯一的写入口，只换账号凭证）
+async function apiPost(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body, cache: 'no-store',
+  });
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (r.status === 401) { showKeyGate(true); throw new Error('unauthorized'); }
+  if (!r.ok) throw new Error(data.detail || data.error || ('HTTP ' + r.status));
+  return data;
+}
+
+function acct(a) {
+  if (!a || (!a.user_name && !a.user_id)) return '（空）';
+  return a.user_name ? a.user_name + '(' + a.user_id + ')' : a.user_id;
+}
+
+async function loadCurrentAccount() {
+  try {
+    const d = await api('/panel/api/status');
+    $('impNote').textContent = '当前账号：' + acct(d.account) + '（导入会替换）';
+  } catch (e) {
+    $('impNote').textContent = '—';
+  }
+}
+
+$('btnImpFile').onclick = () => $('impFile').click();
+$('impFile').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) $('impText').value = (await f.text()).trim();
+};
+$('btnImpGo').onclick = async () => {
+  const box = $('impState');
+  const text = $('impText').value.trim();
+  if (!text) { box.hidden = false; box.className = 'state err'; box.textContent = '先粘贴凭证块或选择文件'; return; }
+  box.hidden = false; box.className = 'state'; box.textContent = '导入中…';
+  try {
+    const d = await apiPost('/panel/api/import/config', text);
+    box.className = 'state ok';
+    box.textContent = '已导入 ' + acct(d.account) + '，替换了 ' + acct(d.replaced);
+    $('impText').value = '';
+    toast('凭证已导入并生效', 'ok');
+    loadCurrentAccount();
+    loadStatus();
+  } catch (e) {
+    box.className = 'state err';
+    box.textContent = '导入失败：' + e.message;
+  }
+};
 
 // ── 启动
 const initView = (location.hash || '').replace('#', '');

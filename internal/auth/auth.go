@@ -443,7 +443,8 @@ func Finalize(cfg Config, callback map[string]string) (Tokens, error) {
 	}, nil
 }
 
-func openBrowser(u string) {
+// OpenBrowser 用系统默认浏览器打开 URL（CLI 与 GUI 的回退路径共用）。
+func OpenBrowser(u string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -460,30 +461,15 @@ func openBrowser(u string) {
 
 // LoginInteractive 本机浏览器登录：起回调服务器 → 打印授权地址 → 等回调。
 func (s *Store) LoginInteractive(timeout time.Duration, noBrowser bool) error {
-	baseURL := strings.TrimRight(s.cfg.BaseURL, "/")
-
-	secretBytes := make([]byte, 16)
-	if _, err := rand.Read(secretBytes); err != nil {
-		return err
-	}
-	clientSecret := hex.EncodeToString(secretBytes)
-
-	logfmt.Infof("DevEco Code 华为账号登录")
-	logfmt.Infof("baseUrl: %s", baseURL)
-
-	cb, err := StartCallbackServer(s.cfg.CallbackPort, clientSecret)
+	loginURL, cb, err := s.PrepareLogin()
 	if err != nil {
 		return err
 	}
-	logfmt.Infof("本地回调服务器已启动: http://127.0.0.1:%d/callback", cb.Port)
-
-	loginURL := fmt.Sprintf("%s/%s?port=%d&appid=%s&code=%s", baseURL, s.cfg.AuthURL, cb.Port, s.cfg.AppID, clientSecret)
 	logfmt.Infof("请在浏览器中完成华为账号授权：\n    %s", loginURL)
 	logfmt.Infof("若浏览器与服务器不同机：先在本机执行 ssh -L %d:127.0.0.1:%d <user>@<服务器>，再打开上面的 URL（回调经隧道送回服务器）", cb.Port, cb.Port)
 	if !noBrowser {
-		openBrowser(loginURL)
+		OpenBrowser(loginURL)
 	}
-
 	callback, err := cb.Wait(timeout)
 	if err != nil {
 		return err
@@ -495,12 +481,36 @@ func (s *Store) LoginInteractive(timeout time.Duration, noBrowser bool) error {
 	return s.Save(tok)
 }
 
-// Save 保存一次登录结果（落盘 + 内存）。
+// PrepareLogin 起本地回调等待器并返回授权 URL + 等待器，供调用方自己决定
+// 怎么打开这个 URL：CLI 用系统浏览器，GUI 用内嵌窗口。回调仍固定在 127.0.0.1，
+// tempToken 只交给本机的等待器，不经任何第三方。
+func (s *Store) PrepareLogin() (string, *Callback, error) {
+	baseURL := strings.TrimRight(s.cfg.BaseURL, "/")
+
+	secretBytes := make([]byte, 16)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return "", nil, err
+	}
+	clientSecret := hex.EncodeToString(secretBytes)
+
+	logfmt.Infof("DevEco Code 华为账号登录")
+	logfmt.Infof("baseUrl: %s", baseURL)
+
+	cb, err := StartCallbackServer(s.cfg.CallbackPort, clientSecret)
+	if err != nil {
+		return "", nil, err
+	}
+	logfmt.Infof("本地回调服务器已启动: http://127.0.0.1:%d/callback", cb.Port)
+
+	loginURL := fmt.Sprintf("%s/%s?port=%d&appid=%s&code=%s", baseURL, s.cfg.AuthURL, cb.Port, s.cfg.AppID, clientSecret)
+	return loginURL, cb, nil
+}
+
+// Save 保存一次登录/导入结果（内存 + 落盘）。调用方自己打面向用户的日志。
 func (s *Store) Save(t Tokens) error {
 	if t.JWTToken == "" {
 		return fmt.Errorf("登录结果缺少 jwtToken")
 	}
 	s.set(t)
-	logfmt.Infof("登录完成 ✅ token 已保存")
 	return nil
 }

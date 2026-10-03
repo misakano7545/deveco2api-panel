@@ -36,6 +36,10 @@ type Config struct {
 	Upstream *upstream.Client // 模型列表实时查询
 	Logs     *Ring            // nil = New 内部建一个（仅测试会这样用）
 
+	// ImportAuth 导入凭证（cmd 注入：换内存 token + 落盘，返回被替换的旧身份）。
+	// nil = 本实例未启用导入（接口回 501）。这是面板唯一的写入口。
+	ImportAuth func(auth.Tokens) (auth.Tokens, error)
+
 	StartedAt time.Time // 零值 = New 时刻
 }
 
@@ -71,6 +75,7 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/status", p.withAuth(p.status))
 	p.mux.HandleFunc("GET /panel/api/models", p.withAuth(p.models))
 	p.mux.HandleFunc("GET /panel/api/logs", p.withAuth(p.logsHandler))
+	p.mux.HandleFunc("POST /panel/api/import/config", p.withAuth(p.importConfig))
 }
 
 // ServeHTTP 统一入口：先写安全响应头再分发，保证页面、静态资源、API
