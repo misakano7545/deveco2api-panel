@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// appVersion 展示用版本号（与 Python 版保持一致）。
+const appVersion = "0.1.0"
+
 func main() {
 	cfgPath := flag.String("config", "config.toml", "配置文件路径")
 	host := flag.String("host", "", "监听 host")

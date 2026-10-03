@@ -61,15 +61,20 @@ type server struct {
 	// ponytail: 上游响应整包读完后一次性转发（与 Python 版行为一致；真流式是后续升级点）
 	upstream *http.Client
 	stop     chan struct{}
+
+	startedAt     time.Time
+	lastRefreshAt time.Time // refreshMu 保护
+	lastRefreshOK bool
 }
 
 func newServer(cfg *Config, cfgPath string) *server {
 	return &server{
-		cfg:      cfg,
-		cfgPath:  cfgPath,
-		chatIDs:  map[string]string{},
-		upstream: &http.Client{Timeout: 300 * time.Second},
-		stop:     make(chan struct{}),
+		cfg:       cfg,
+		cfgPath:   cfgPath,
+		chatIDs:   map[string]string{},
+		upstream:  &http.Client{Timeout: 300 * time.Second},
+		stop:      make(chan struct{}),
+		startedAt: time.Now(),
 	}
 }
 
@@ -80,6 +85,14 @@ func (s *server) routes() http.Handler {
 	})
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/v1/chat/completions", s.handleChat)
+	s.registerPanel(mux)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/panel/", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
 	return mux
 }
 
@@ -134,6 +147,7 @@ func (s *server) refreshToken() bool {
 
 	data, err := refreshAccessToken(s.cfg.DevEco.BaseURL, jwt)
 	if err != nil {
+		s.lastRefreshAt, s.lastRefreshOK = time.Now(), false
 		logError("刷新 access_token 失败: %v", err)
 		return false
 	}
@@ -141,6 +155,7 @@ func (s *server) refreshToken() bool {
 	if err := s.cfg.save(); err != nil {
 		logWarn("保存配置失败: %v", err)
 	}
+	s.lastRefreshAt, s.lastRefreshOK = time.Now(), true
 	logInfo("access_token 刷新成功")
 	return true
 }

@@ -167,10 +167,10 @@ func refreshAccessToken(baseURL, jwt string) (map[string]any, error) {
 	return data, nil
 }
 
-func jwtClaim(jwt, key string) string {
+func jwtClaims(jwt string) map[string]any {
 	parts := strings.Split(jwt, ".")
 	if len(parts) != 3 {
-		return ""
+		return nil
 	}
 	payload := parts[1]
 	if pad := len(payload) % 4; pad != 0 {
@@ -178,14 +178,16 @@ func jwtClaim(jwt, key string) string {
 	}
 	raw, err := base64.URLEncoding.DecodeString(payload)
 	if err != nil {
-		return ""
+		return nil
 	}
 	var m map[string]any
 	if json.Unmarshal(raw, &m) != nil {
-		return ""
+		return nil
 	}
-	return strOf(m[key])
+	return m
 }
+
+func jwtClaim(jwt, key string) string { return strOf(jwtClaims(jwt)[key]) }
 
 func applyUserInfo(cfg *Config, data map[string]any) {
 	ui, _ := data["userInfo"].(map[string]any)
