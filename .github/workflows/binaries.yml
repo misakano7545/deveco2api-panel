@@ -46,11 +46,12 @@ jobs:
             mkdir -p "$dir"
             ext=""
             [ "$1" = "windows" ] && ext=".exe"
-            for c in server login; do
-              GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath \
-                -ldflags="-s -w -X main.appVersion=${VERSION}" \
-                -o "$dir/deveco2api-$c$ext" "./cmd/$c"
-            done
+            GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath \
+              -ldflags="-s -w -X main.appVersion=${VERSION}" \
+              -o "$dir/deveco2api-panel$ext" ./cmd/server
+            GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath \
+              -ldflags="-s -w -X main.appVersion=${VERSION}" \
+              -o "$dir/deveco2api-login$ext" ./cmd/login
             # GUI 默认构建（无 webview tag）：用系统浏览器打开登录页，无 cgo 依赖
             GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
               -o "$dir/deveco2api-gui$ext" ./cmd/login-gui
