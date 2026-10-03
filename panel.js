@@ -91,7 +91,8 @@ function switchView(v) {
   $('ttl').textContent = TITLES[v] || v;
   clearInterval(statusTimer);
   clearInterval(logsTimer);
-  if (v === 'status') { loadStatus(); statusTimer = setInterval(loadStatus, 5000); }
+  loadStatus(); // 页脚状态/版本/密钥按钮随任意视图初始化（深链 #models/#logs 不再停在「连接中」）
+  if (v === 'status') { statusTimer = setInterval(loadStatus, 5000); }
   if (v === 'models') loadModels();
   if (v === 'logs') { loadLogs(); logsTimer = setInterval(loadLogs, 3000); }
   closeNav();
