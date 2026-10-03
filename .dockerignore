@@ -1,0 +1,9 @@
+.git
+.gitignore
+.github
+dist
+deveco2api-panel
+deveco2api-login
+config.toml
+.login-relay
+*.log

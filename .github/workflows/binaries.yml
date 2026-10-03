@@ -1,0 +1,57 @@
+name: binaries
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: test
+        run: go test ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          pack() { # $1=os $2=arch
+            dir="dist/deveco2api-$1-$2"
+            mkdir -p "$dir"
+            ext=""
+            [ "$1" = "windows" ] && ext=".exe"
+            GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+              -o "$dir/deveco2api-panel$ext" ./cmd/server
+            GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+              -o "$dir/deveco2api-login$ext" ./cmd/login
+            cp config.example.toml README.md "$dir/"
+          }
+          for os in linux windows; do
+            for arch in amd64 arm64; do
+              pack "$os" "$arch"
+            done
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/**
+
+      - name: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**

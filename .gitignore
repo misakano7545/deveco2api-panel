@@ -1,9 +1,12 @@
 # 构建产物
 deveco2api-panel
-deveco2api-go
+deveco2api-login
 
 # 本地配置（含 token，勿入库）
 config.toml
+
+# 登录中继的运行期状态目录
+.login-relay/
 
 # 运行产物
 *.log

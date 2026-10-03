@@ -1,4 +1,4 @@
-package main
+package server
 
 // panel_test.go — 面板路由 / 鉴权 / 数据接口自测。
 
@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/misakano7545/deveco2api-panel/internal/jsonval"
+	"github.com/misakano7545/deveco2api-panel/internal/logfmt"
 )
 
 func TestPanelRoutes(t *testing.T) {
@@ -28,13 +31,13 @@ func TestPanelRoutes(t *testing.T) {
 		t.Fatal("面板安全头缺失")
 	}
 
-	// /panel → /panel/ 跳转；/ → /panel/ 跳转
+	// /panel → /panel/ 跳转（ServeMux 自动重定向，301）；/ → /panel/ 跳转
 	resp, err = noRedirect.Get(ts.URL + "/panel")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != 302 || !strings.HasSuffix(resp.Header.Get("Location"), "/panel/") {
+	if resp.StatusCode != 301 || !strings.HasSuffix(resp.Header.Get("Location"), "/panel/") {
 		t.Fatalf("/panel 应跳 /panel/，实际 %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	resp, err = noRedirect.Get(ts.URL + "/")
@@ -47,14 +50,14 @@ func TestPanelRoutes(t *testing.T) {
 	}
 
 	// 前端脚本
-	resp, err = http.Get(ts.URL + "/panel/panel.js")
+	resp, err = http.Get(ts.URL + "/panel/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	js, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.Contains(string(js), "/panel/api/status") {
-		t.Fatalf("panel.js 异常: %d", resp.StatusCode)
+		t.Fatalf("app.js 异常: %d", resp.StatusCode)
 	}
 
 	// API：无 key 401（本测试 cfg 设置了 api_key），带 key 200
@@ -82,7 +85,7 @@ func TestPanelRoutes(t *testing.T) {
 	}
 
 	// 日志：写入一条后应能在环形缓冲里读到
-	logInfo("panel test %s", "marker")
+	logfmt.Infof("panel test %s", "marker")
 	code, raw = doJSON(t, "GET", ts.URL+"/panel/api/logs?limit=50", "test-key", nil)
 	if code != 200 || !strings.Contains(string(raw), "panel test marker") {
 		t.Fatalf("logs 未返回日志行: %d %s", code, raw)
@@ -105,7 +108,7 @@ func TestPanelRoutes(t *testing.T) {
 	}
 	stripped := map[string]bool{}
 	for _, m := range md.Models {
-		stripped[strOf(m["id"])] = m["thinking_stripped"] == true
+		stripped[jsonval.Str(m["id"])] = m["thinking_stripped"] == true
 	}
 	if !stripped["GLM-5.3"] || stripped["GLM-5.1"] {
 		t.Fatalf("思维链剥离标记不对: %v", stripped)

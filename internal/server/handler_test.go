@@ -1,4 +1,4 @@
-package main
+package server
 
 // proxy_test.go — 离线自测：mock 上游验证核心链路（对齐 Python 版用例，无需华为账号）。
 
@@ -13,6 +13,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/misakano7545/deveco2api-panel/internal/auth"
+	"github.com/misakano7545/deveco2api-panel/internal/config"
+	"github.com/misakano7545/deveco2api-panel/internal/jsonval"
+	"github.com/misakano7545/deveco2api-panel/internal/logfmt"
+	"github.com/misakano7545/deveco2api-panel/internal/panel"
+	"github.com/misakano7545/deveco2api-panel/internal/upstream"
 )
 
 const rateLimitMsg = "New session request rate exceeded. Please retry later or set up a custom model."
@@ -123,7 +130,7 @@ func (m *mockUpstream) handler() http.Handler {
 			return
 		}
 		content := "pong"
-		if strOf(req["model"]) == "GLM-5.3" {
+		if jsonval.Str(req["model"]) == "GLM-5.3" {
 			content = "Let me think about it carefully.</think>42"
 		}
 		writeTestJSON(w, 200, map[string]any{
@@ -156,7 +163,7 @@ func (m *mockUpstream) handler() http.Handler {
 		}
 		io.WriteString(w, "data: \n\n") // 上游偶发空帧：必须被跳过
 		parts := []string{"po", "ng"}
-		if strOf(req["model"]) == "GLM-5.3" && think {
+		if jsonval.Str(req["model"]) == "GLM-5.3" && think {
 			parts = []string{"Let me think", " about it", " carefully.</thi", "nk>", "42"}
 		}
 		for i, p := range parts {
@@ -179,23 +186,74 @@ func (m *mockUpstream) handler() http.Handler {
 
 // ---------------------------------------------------------------- helpers
 
-func newTestServer(t *testing.T, m *mockUpstream) (*httptest.Server, *server, *Config) {
+// newTestServer mock 上游 + 真实网关（默认 6h 保活间隔）。
+func newTestServer(t *testing.T, m *mockUpstream) (*httptest.Server, *Handler, *config.Config) {
+	t.Helper()
+	return newTestServerWithKeepalive(t, m, 6.0)
+}
+
+// newTestServerWithKeepalive 同 newTestServer，保活间隔可指定（保活用例要秒级）。
+// 装配方式与 cmd/server/wiring.go 一致：依赖在此注入，组件本身不认识配置文件。
+func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours float64) (*httptest.Server, *Handler, *config.Config) {
 	t.Helper()
 	up := httptest.NewServer(m.handler())
 	t.Cleanup(up.Close)
 
-	cfg := defaultConfig()
+	cfg := config.Default()
 	cfg.Server.APIKey = "test-key"
 	cfg.DevEco.BaseURL = up.URL
-	cfg.DevEco.Auth = AuthConfig{JWTToken: "jwt-1", AccessToken: "old-token"}
-	cfg.path = filepath.Join(t.TempDir(), "config.toml")
-	if err := cfg.save(); err != nil {
+	cfg.DevEco.KeepaliveHours = keepaliveHours
+	cfg.DevEco.Auth = config.AuthConfig{JWTToken: "jwt-1", AccessToken: "old-token"}
+	cfg.SetPath(filepath.Join(t.TempDir(), "config.toml"))
+	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
-	srv := newServer(cfg, cfg.path)
-	ts := httptest.NewServer(srv.routes())
+
+	store := auth.New(auth.Config{
+		BaseURL:      cfg.DevEco.BaseURL,
+		AppID:        cfg.DevEco.AppID,
+		AuthURL:      cfg.DevEco.AuthURL,
+		CallbackPort: cfg.DevEco.CallbackPort,
+	}, cfg.Tokens(), cfg.SaveTokens)
+
+	upc := upstream.New(upstream.Config{
+		BaseURL:        cfg.DevEco.BaseURL,
+		Client:         cfg.DevEco.Client,
+		Project:        cfg.DevEco.Project,
+		UserAgent:      cfg.DevEco.UserAgent,
+		Model:          cfg.DevEco.Model,
+		ThinkingModels: cfg.DevEco.ThinkingModels,
+		Token:          func() string { return store.Tokens().AccessToken },
+	})
+
+	ring := panel.NewRing(500)
+	logfmt.SetSink(ring.Add) // 面板日志接口读这个环
+	console := panel.New(panel.Config{
+		Version:        "test",
+		APIKey:         cfg.Server.APIKey,
+		Listen:         "127.0.0.1:0",
+		ConfigPath:     cfg.Path(),
+		UpstreamURL:    cfg.DevEco.BaseURL,
+		ModelDefault:   cfg.DevEco.Model,
+		ThinkingModels: cfg.DevEco.ThinkingModels,
+		KeepaliveHours: cfg.DevEco.KeepaliveHours,
+		Auth:           store,
+		Upstream:       upc,
+		Logs:           ring,
+	})
+
+	h := New(Config{
+		Version:        "test",
+		APIKey:         cfg.Server.APIKey,
+		Listen:         "127.0.0.1:0",
+		Upstream:       upc,
+		Auth:           store,
+		Panel:          console,
+		KeepaliveHours: cfg.DevEco.KeepaliveHours,
+	})
+	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return ts, srv, cfg
+	return ts, h, cfg
 }
 
 func doJSON(t *testing.T, method, url, key string, body any) (int, []byte) {
@@ -249,8 +307,8 @@ func aggregateSSE(raw string) sseAgg {
 		}
 		cm, _ := choices[0].(map[string]any)
 		d, _ := cm["delta"].(map[string]any)
-		agg.content += strOf(d["content"])
-		agg.reasoning += strOf(d["reasoning_content"])
+		agg.content += jsonval.Str(d["content"])
+		agg.reasoning += jsonval.Str(d["reasoning_content"])
 	}
 	return agg
 }
@@ -276,10 +334,10 @@ func TestModelsAuthAndMapping(t *testing.T) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		t.Fatal(err)
 	}
-	if len(data.Data) != 2 || strOf(data.Data[0]["id"]) != "GLM-5.1" || strOf(data.Data[1]["id"]) != "GLM-5.3" {
+	if len(data.Data) != 2 || jsonval.Str(data.Data[0]["id"]) != "GLM-5.1" || jsonval.Str(data.Data[1]["id"]) != "GLM-5.3" {
 		t.Fatalf("模型列表不对: %s", raw)
 	}
-	if strOf(data.Data[0]["owned_by"]) != "GLM" {
+	if jsonval.Str(data.Data[0]["owned_by"]) != "GLM" {
 		t.Fatalf("owned_by 不对: %s", raw)
 	}
 }
@@ -323,7 +381,7 @@ func TestChatNonstream401RefreshRetry(t *testing.T) {
 	var d map[string]any
 	_ = json.Unmarshal(raw, &d)
 	msg, _ := d["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
-	if strOf(msg["content"]) != "pong" {
+	if jsonval.Str(msg["content"]) != "pong" {
 		t.Fatalf("内容不对: %s", raw)
 	}
 
@@ -375,10 +433,10 @@ func TestThinkStripNonstream(t *testing.T) {
 	var d map[string]any
 	_ = json.Unmarshal(raw, &d)
 	msg, _ := d["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
-	if strOf(msg["content"]) != "42" {
+	if jsonval.Str(msg["content"]) != "42" {
 		t.Fatalf("正文应为 42: %v", msg)
 	}
-	if strOf(msg["reasoning_content"]) != "Let me think about it carefully." {
+	if jsonval.Str(msg["reasoning_content"]) != "Let me think about it carefully." {
 		t.Fatalf("思维链不对: %v", msg)
 	}
 }
@@ -446,7 +504,7 @@ func TestRateLimitTranslations(t *testing.T) {
 	var d map[string]any
 	_ = json.Unmarshal(raw, &d)
 	e, _ := d["error"].(map[string]any)
-	if strOf(e["type"]) != "UserSessionLimitExceeded" {
+	if jsonval.Str(e["type"]) != "UserSessionLimitExceeded" {
 		t.Fatalf("error 未透传: %s", raw)
 	}
 
@@ -471,10 +529,9 @@ func TestRateLimitTranslations(t *testing.T) {
 
 func TestKeepaliveRefreshes(t *testing.T) {
 	m := newMock()
-	_, srv, cfg := newTestServer(t, m)
-	cfg.DevEco.KeepaliveHours = 0.0003 // ≈1.08s
-	srv.startKeepalive()
-	defer srv.stopKeepalive()
+	_, h, _ := newTestServerWithKeepalive(t, m, 0.0003) // ≈1.08s
+	h.StartKeepalive()
+	defer h.StopKeepalive()
 
 	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) {
@@ -490,24 +547,4 @@ func TestKeepaliveRefreshes(t *testing.T) {
 	n := m.refreshCalls
 	m.mu.Unlock()
 	t.Fatalf("保活应至少触发 2 次刷新，实际 %d", n)
-}
-
-func TestIDFormats(t *testing.T) {
-	s := sessionID()
-	if !strings.HasPrefix(s, "ses_") || len(s) != 30 {
-		t.Fatalf("session id 格式不对: %s (%d)", s, len(s))
-	}
-	msg := messageID()
-	if !strings.HasPrefix(msg, "msg_") || len(msg) != 30 {
-		t.Fatalf("message id 格式不对: %s", msg)
-	}
-	c := chatID()
-	if len(c) != 32 {
-		t.Fatalf("chat id 格式不对: %s", c)
-	}
-	for _, r := range c {
-		if !strings.ContainsRune("0123456789abcdef", r) {
-			t.Fatalf("chat id 非小写十六进制: %s", c)
-		}
-	}
 }

@@ -1,8 +1,9 @@
-package main
+package relay
 
 // relay_test.go — 离线自测：登录中继链路（对齐 Python 版 test_login_relay.py，无华为调用）。
 
 import (
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/misakano7545/deveco2api-panel/internal/auth"
 )
 
 func freePort(t *testing.T) int {
@@ -27,35 +30,11 @@ func freePort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
-func TestFinalizeLoginScenarios(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/authrouter/auth/api/temptoken/check", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "h.p.s") // 假 jwt（3 段）
-	})
-	mux.HandleFunc("/authrouter/auth/api/jwToken/check", func(w http.ResponseWriter, r *http.Request) {
-		writeTestJSON(w, 200, map[string]any{"status": true, "userInfo": map[string]any{
-			"accessToken": "AT", "refreshToken": "RT", "userId": "U1", "name": "N", "realName": true,
-		}})
-	})
-	up := httptest.NewServer(mux)
-	defer up.Close()
-
-	cfg := defaultConfig()
-	cfg.DevEco.BaseURL = up.URL
-
-	res, err := finalizeLogin(cfg, map[string]string{"code": "x", "tempToken": "tt1", "siteId": "1", "quit": ""})
-	if err != nil || res.AccessToken != "AT" || res.UserID != "U1" {
-		t.Fatalf("正常收尾应成功: %v %+v", err, res)
-	}
-	if _, err := finalizeLogin(cfg, map[string]string{"siteId": "1", "quit": "access_denied"}); err == nil {
-		t.Fatal("取消授权应报错")
-	}
-	if _, err := finalizeLogin(cfg, map[string]string{"tempToken": "tt", "siteId": "2"}); err == nil {
-		t.Fatal("非中国区应报错")
-	}
-	if _, err := finalizeLogin(cfg, map[string]string{"siteId": "1"}); err == nil {
-		t.Fatal("缺 tempToken 应报错")
-	}
+func writeTestJSON(w http.ResponseWriter, status int, v any) {
+	b, _ := json.Marshal(v)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(b)
 }
 
 func TestRelayChain(t *testing.T) {
@@ -67,13 +46,13 @@ func TestRelayChain(t *testing.T) {
 
 	key, nonce := "test-key", "testnonce123"
 	waiterPort := freePort(t)
-	cb, err := startCallbackServer(waiterPort, nonce)
+	cb, err := auth.StartCallbackServer(waiterPort, nonce)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cb.server.Close()
+	defer cb.Close()
 
-	relayCfg = relayConfig{AccessKey: key, Nonce: nonce, WaiterPort: cb.port, WaiterLog: waiterLog}
+	relayCfg = relayConfig{AccessKey: key, Nonce: nonce, WaiterPort: cb.Port, WaiterLog: waiterLog}
 	relaySess.reset()
 	ts := httptest.NewServer(relayHandler())
 	defer ts.Close()
@@ -117,7 +96,7 @@ func TestRelayChain(t *testing.T) {
 	}
 
 	// 回调经中继转发 → 等待器收到（浏览器凭 rk cookie 过门禁）
-	resp, err = client.PostForm(ts.URL+"/cb/"+strconv.Itoa(cb.port)+"/callback",
+	resp, err = client.PostForm(ts.URL+"/cb/"+strconv.Itoa(cb.Port)+"/callback",
 		url.Values{"code": {nonce}, "tempToken": {"tk1"}, "siteId": {"1"}})
 	if err != nil {
 		t.Fatal(err)
@@ -127,13 +106,12 @@ func TestRelayChain(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	select {
-	case got := <-cb.res:
-		if got["tempToken"] != "tk1" {
-			t.Fatalf("等待器收到的参数不对: %v", got)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("等待器未收到回调")
+	got, err := cb.Wait(5 * time.Second)
+	if err != nil {
+		t.Fatalf("等待器未收到回调: %v", err)
+	}
+	if got["tempToken"] != "tk1" {
+		t.Fatalf("等待器收到的参数不对: %v", got)
 	}
 
 	// finish 页面可访问

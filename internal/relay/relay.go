@@ -1,4 +1,4 @@
-package main
+package relay
 
 // relay.go — 登录中继（无头 / 远程服务器场景），对 login_relay.py 的移植。
 //
@@ -30,6 +30,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/misakano7545/deveco2api-panel/internal/auth"
+	"github.com/misakano7545/deveco2api-panel/internal/jsonval"
+	"github.com/misakano7545/deveco2api-panel/internal/logfmt"
 )
 
 const (
@@ -100,7 +104,7 @@ func (s *relaySession) note(msg string) {
 		s.transitions = s.transitions[len(s.transitions)-60:]
 	}
 	s.mu.Unlock()
-	logInfo("[session] %s", msg)
+	logfmt.Infof("[session] %s", msg)
 }
 
 func (s *relaySession) setPhase(phase, detail string) {
@@ -168,7 +172,7 @@ func jarUpdate(resp *http.Response, reqHost string) {
 			continue
 		}
 		jarSet(relayCookie{Name: c.Name, Value: c.Value, Domain: cdomain, Path: cpath, Secure: c.Secure, HTTPOnly: c.HttpOnly})
-		logInfo("[jar+] %s @%s%s", c.Name, cdomain, cpath)
+		logfmt.Infof("[jar+] %s @%s%s", c.Name, cdomain, cpath)
 	}
 }
 
@@ -469,7 +473,7 @@ func handleRelayAny(w http.ResponseWriter, r *http.Request) {
 	path, query := r.URL.Path, r.URL.RawQuery
 	base := routeFor(path)
 	if base == "" {
-		logWarn("[miss] %s %s", r.Method, trunc(path, 120))
+		logfmt.Warnf("[miss] %s %s", r.Method, logfmt.Truncate(path, 120))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = io.WriteString(w, "relay: no route for "+path)
@@ -493,7 +497,7 @@ func handleRelayAny(w http.ResponseWriter, r *http.Request) {
 	req.Host = host
 	up, err := relayHTTPClient.Do(req)
 	if err != nil {
-		logError("[err] %s %s -> %v", r.Method, trunc(path, 100), err)
+		logfmt.Errorf("[err] %s %s -> %v", r.Method, logfmt.Truncate(path, 100), err)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = io.WriteString(w, "relay upstream error: "+err.Error())
@@ -502,10 +506,10 @@ func handleRelayAny(w http.ResponseWriter, r *http.Request) {
 	defer up.Body.Close()
 	jarUpdate(up, host)
 	if up.StatusCode >= 301 && up.StatusCode <= 308 {
-		logInfo("[loc] %s %s -> %s", r.Method, trunc(path, 70), trunc(up.Header.Get("Location"), 200))
+		logfmt.Infof("[loc] %s %s -> %s", r.Method, logfmt.Truncate(path, 70), logfmt.Truncate(up.Header.Get("Location"), 200))
 	}
 	n := writeRelayResponse(w, up, requestOrigin(r), r.Header.Get("Accept-Encoding"))
-	logInfo("[px] %s %s -> %d %s (%db)", r.Method, trunc(path, 90), up.StatusCode, host, n)
+	logfmt.Infof("[px] %s %s -> %d %s (%db)", r.Method, logfmt.Truncate(path, 90), up.StatusCode, host, n)
 }
 
 // ---------------------------------------------------------------- routes
@@ -675,7 +679,7 @@ func findTunnelURL(line string) string {
 // startCloudflared — 启动快速隧道指向本机中继。返回 (cmd, url)；不可用/失败为 (nil, "")。
 func startCloudflared(timeout time.Duration) (*exec.Cmd, string) {
 	if _, err := exec.LookPath("cloudflared"); err != nil {
-		logWarn("未找到 cloudflared，跳过隧道（仅本机可访问）")
+		logfmt.Warnf("未找到 cloudflared，跳过隧道（仅本机可访问）")
 		return nil, ""
 	}
 	pr, pw, err := os.Pipe()
@@ -723,21 +727,22 @@ loop:
 		}
 	}()
 	if url == "" {
-		logWarn("cloudflared 未成功创建隧道（%.0fs 内无地址，可能被限流/网络受限）；本次仅本机可访问，可稍后重试", timeout.Seconds())
+		logfmt.Warnf("cloudflared 未成功创建隧道（%.0fs 内无地址，可能被限流/网络受限）；本次仅本机可访问，可稍后重试", timeout.Seconds())
 	}
 	return cmd, url
 }
 
-// loginViaRelay — 无头/远程登录：本机同时运行「回调等待器 + 登录中继」。
-func loginViaRelay(cfg *Config, cfgPath string, relayPort int, accessKey string, timeout time.Duration, tunnel bool) error {
-	stateDir := filepath.Join(filepath.Dir(cfgPath), ".login-relay")
+// LoginViaRelay 无头/远程登录：本机同时运行「回调等待器 + 登录中继」，
+// 浏览器（可经隧道）经中继完成华为授权，回调经中继送回等待器换取 token。
+func LoginViaRelay(o Options) error {
+	stateDir := filepath.Join(filepath.Dir(o.ConfigPath), ".login-relay")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return err
 	}
-	if accessKey == "" {
+	if o.AccessKey == "" {
 		b := make([]byte, 8)
 		randRead(b)
-		accessKey = hex.EncodeToString(b)
+		o.AccessKey = hex.EncodeToString(b)
 	}
 	secretBytes := make([]byte, 16)
 	randRead(secretBytes)
@@ -749,28 +754,28 @@ func loginViaRelay(cfg *Config, cfgPath string, relayPort int, accessKey string,
 	}
 
 	// 1) 回调等待器（复用 auth.go 的回调服务器）
-	cb, err := startCallbackServer(cfg.DevEco.CallbackPort, clientSecret)
+	cb, err := auth.StartCallbackServer(o.AuthConfig.CallbackPort, clientSecret)
 	if err != nil {
 		return err
 	}
-	logInfo("回调等待器已启动: http://127.0.0.1:%d/callback", cb.port)
+	logfmt.Infof("回调等待器已启动: http://127.0.0.1:%d/callback", cb.Port)
 
 	// 2) 登录中继
-	relayCfg = relayConfig{Port: relayPort, AccessKey: accessKey, Nonce: clientSecret, WaiterPort: cb.port, WaiterLog: waiterLog}
+	relayCfg = relayConfig{Port: o.RelayPort, AccessKey: o.AccessKey, Nonce: clientSecret, WaiterPort: cb.Port, WaiterLog: waiterLog}
 	relaySess.reset()
-	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", relayPort), Handler: relayHandler()}
+	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", o.RelayPort), Handler: relayHandler()}
 	go func() { _ = srv.ListenAndServe() }()
 
 	// 3) 可选隧道
 	var tunnelCmd *exec.Cmd
 	tunnelURL := ""
-	if tunnel {
+	if o.Tunnel {
 		tunnelCmd, tunnelURL = startCloudflared(30 * time.Second)
 	}
 
-	entryURL := fmt.Sprintf("http://127.0.0.1:%d/?k=%s", relayPort, accessKey)
+	entryURL := fmt.Sprintf("http://127.0.0.1:%d/?k=%s", o.RelayPort, o.AccessKey)
 	if tunnelURL != "" {
-		entryURL = tunnelURL + "/?k=" + accessKey
+		entryURL = tunnelURL + "/?k=" + o.AccessKey
 	}
 
 	defer func() {
@@ -786,7 +791,7 @@ func loginViaRelay(cfg *Config, cfgPath string, relayPort int, accessKey string,
 	waitReady := time.Now().Add(10 * time.Second)
 	for time.Now().Before(waitReady) {
 		cl := &http.Client{Timeout: 2 * time.Second}
-		if resp, err := cl.Get(fmt.Sprintf("http://127.0.0.1:%d/status?k=%s", relayPort, accessKey)); err == nil {
+		if resp, err := cl.Get(fmt.Sprintf("http://127.0.0.1:%d/status?k=%s", o.RelayPort, o.AccessKey)); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == 200 {
 				break
@@ -795,25 +800,25 @@ func loginViaRelay(cfg *Config, cfgPath string, relayPort int, accessKey string,
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	logInfo("%s", strings.Repeat("=", 64))
-	logInfo("请在浏览器打开以下地址，用华为账号完成登录：")
-	logInfo("    %s", entryURL)
+	logfmt.Infof("%s", strings.Repeat("=", 64))
+	logfmt.Infof("请在浏览器打开以下地址，用华为账号完成登录：")
+	logfmt.Infof("    %s", entryURL)
 	if tunnelURL == "" {
-		logInfo("（服务器无浏览器时：点对点隧道/端口转发后从本机访问；或使用 --tunnel）")
+		logfmt.Infof("（服务器无浏览器时：点对点隧道/端口转发后从本机访问；或使用 --tunnel）")
 	}
-	logInfo("回调等待 %d 秒，完成授权后 token 会自动写入 %s", int(timeout.Seconds()), cfgPath)
-	logInfo("%s", strings.Repeat("=", 64))
+	logfmt.Infof("回调等待 %d 秒，完成授权后 token 会自动写入 %s", int(o.Timeout.Seconds()), o.ConfigPath)
+	logfmt.Infof("%s", strings.Repeat("=", 64))
 
 	// 4) 等浏览器回调 → 换 token → 保存
-	callback, err := cb.wait(timeout)
+	callback, err := cb.Wait(o.Timeout)
 	if err != nil {
 		return err
 	}
-	res, err := finalizeLogin(cfg, callback)
+	tok, err := auth.Finalize(o.AuthConfig, callback)
 	if err != nil {
 		return err
 	}
-	if err := saveLoginResult(cfg, res); err != nil {
+	if err := o.Save(tok); err != nil {
 		return err
 	}
 	if f, err := os.OpenFile(waiterLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
@@ -833,7 +838,7 @@ func loginViaRelay(cfg *Config, cfgPath string, relayPort int, accessKey string,
 		time.Sleep(500 * time.Millisecond)
 	}
 	time.Sleep(10 * time.Second)
-	logInfo("登录完成 ✅ token 已保存到 %s", cfgPath)
+	logfmt.Infof("登录完成 ✅ token 已保存到 %s", o.ConfigPath)
 	return nil
 }
 
@@ -841,4 +846,33 @@ func randRead(b []byte) {
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}
+}
+
+// ---------------------------------------------------------------- 装配接口
+
+// Options 中继登录依赖（cmd/login 装配注入）。
+type Options struct {
+	AuthConfig auth.Config // 上游端点与回调等待器端口
+	RelayPort  int         // 中继监听端口（浏览器访问入口）
+	AccessKey  string      // 访问口令；空 = 随机生成并打印
+	Timeout    time.Duration
+	Tunnel     bool   // 自动起 cloudflared 快速隧道并打印外网地址
+	ConfigPath string // 状态目录定位与完成提示
+	Save       func(auth.Tokens) error
+}
+
+// writeJSON/writeError 中继自身的响应 helper（与网关同口径：不转义 < > &）。
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	body, err := jsonval.Marshal(v)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+}
+
+func writeError(w http.ResponseWriter, status int, detail string) {
+	writeJSON(w, status, map[string]any{"detail": detail})
 }

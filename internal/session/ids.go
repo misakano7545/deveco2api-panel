@@ -1,6 +1,6 @@
-package main
-
-// ids.go — 复刻 id.py（即 packages/opencode/src/id/id.ts）的 ID 生成。
+// Package session 复刻官方客户端的会话/消息 ID 生成（id.py 即
+// packages/opencode/src/id/id.ts）：上游按 ID 形态归组会话与请求。
+package session
 
 import (
 	"crypto/rand"
@@ -12,9 +12,9 @@ import (
 const idChars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 var (
-	idMu      sync.Mutex
-	idLastTS  int64
-	idCounter uint64
+	mu      sync.Mutex
+	lastTS  int64
+	counter uint64
 )
 
 func randomBase62(n int) string {
@@ -29,15 +29,15 @@ func randomBase62(n int) string {
 }
 
 func createID(prefix string, descending bool) string {
-	idMu.Lock()
+	mu.Lock()
 	ts := time.Now().UnixMilli()
-	if ts != idLastTS {
-		idLastTS = ts
-		idCounter = 0
+	if ts != lastTS {
+		lastTS = ts
+		counter = 0
 	}
-	idCounter++
-	c := idCounter
-	idMu.Unlock()
+	counter++
+	c := counter
+	mu.Unlock()
 
 	now := (uint64(ts) << 12) + c
 	if descending {
@@ -48,11 +48,14 @@ func createID(prefix string, descending bool) string {
 	return prefix + "_" + hex.EncodeToString(tb) + randomBase62(14)
 }
 
-func sessionID() string { return createID("ses", true) }
-func messageID() string { return createID("msg", false) }
+// SessionID 会话 ID（ses_ 前缀，时间戳降序，与官方一致）。
+func SessionID() string { return createID("ses", true) }
 
-// chatID 生成 32 位小写十六进制（16 随机字节）。
-func chatID() string {
+// MessageID 消息 ID（msg_ 前缀，时间戳升序）。
+func MessageID() string { return createID("msg", false) }
+
+// ChatID 32 位小写十六进制请求 ID（16 随机字节）。
+func ChatID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		panic(err)

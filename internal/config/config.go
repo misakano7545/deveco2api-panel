@@ -1,14 +1,18 @@
-package main
-
-// config.go — config.toml 的读写（与 Python 版 / 上游格式完全兼容）。
+// Package config config.toml 的读写（与 Python 版 / 上游格式完全兼容）。
+//
+// 单独成包而不是放在 cmd/server 里：网关（cmd/server）与登录（cmd/login）两个
+// 二进制读写同一份配置文件与同一份凭证，结构复制两份必然漂移。
+package config
 
 import (
 	"os"
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"github.com/misakano7545/deveco2api-panel/internal/auth"
 )
 
+// AuthConfig 凭证段（[deveco.auth]）。
 type AuthConfig struct {
 	JWTToken     string `toml:"jwt_token"`
 	AccessToken  string `toml:"access_token"`
@@ -17,6 +21,7 @@ type AuthConfig struct {
 	UserName     string `toml:"user_name"`
 }
 
+// DevEcoConfig 上游段（[deveco]）。
 type DevEcoConfig struct {
 	BaseURL           string     `toml:"base_url"`
 	AuthURL           string     `toml:"auth_url"`
@@ -33,16 +38,19 @@ type DevEcoConfig struct {
 	Auth              AuthConfig `toml:"auth"`
 }
 
+// ServerConfig 网关监听与鉴权段（[server]）。
 type ServerConfig struct {
 	Host   string `toml:"host"`
 	Port   int    `toml:"port"`
 	APIKey string `toml:"api_key"`
 }
 
+// LoggingConfig 日志段（[logging]）。
 type LoggingConfig struct {
 	Level string `toml:"level"`
 }
 
+// Config 全量配置。path/mu 是运行期字段，不参与序列化。
 type Config struct {
 	Server  ServerConfig  `toml:"server"`
 	DevEco  DevEcoConfig  `toml:"deveco"`
@@ -52,7 +60,8 @@ type Config struct {
 	mu   sync.Mutex
 }
 
-func defaultConfig() *Config {
+// Default 默认配置（配置文件缺项由它兜底）。
+func Default() *Config {
 	return &Config{
 		Server: ServerConfig{Host: "127.0.0.1", Port: 10102},
 		DevEco: DevEcoConfig{
@@ -73,8 +82,9 @@ func defaultConfig() *Config {
 	}
 }
 
-func loadConfig(path string) (*Config, error) {
-	cfg := defaultConfig()
+// Load 读取配置文件。
+func Load(path string) (*Config, error) {
+	cfg := Default()
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
 		return nil, err
 	}
@@ -82,8 +92,35 @@ func loadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// save 原子写回（tmp + rename），与 Python 版一致。
-func (c *Config) save() error {
+// SetPath 设置落盘路径（Load 之外由测试/装配使用）。
+func (c *Config) SetPath(path string) {
+	c.mu.Lock()
+	c.path = path
+	c.mu.Unlock()
+}
+
+// Path 当前配置文件路径。
+func (c *Config) Path() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.path
+}
+
+// Tokens 配置里的凭证快照（装配 auth.Store 用）。
+func (c *Config) Tokens() auth.Tokens {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return auth.Tokens{
+		JWTToken:     c.DevEco.Auth.JWTToken,
+		AccessToken:  c.DevEco.Auth.AccessToken,
+		RefreshToken: c.DevEco.Auth.RefreshToken,
+		UserID:       c.DevEco.Auth.UserID,
+		UserName:     c.DevEco.Auth.UserName,
+	}
+}
+
+// Save 原子写回（tmp + rename），与 Python 版一致。
+func (c *Config) Save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	tmp := c.path + ".tmp"
@@ -99,4 +136,18 @@ func (c *Config) save() error {
 		return err
 	}
 	return os.Rename(tmp, c.path)
+}
+
+// SaveTokens 更新凭证并落盘（auth.Store 的 save 回调）。
+func (c *Config) SaveTokens(t auth.Tokens) error {
+	c.mu.Lock()
+	c.DevEco.Auth = AuthConfig{
+		JWTToken:     t.JWTToken,
+		AccessToken:  t.AccessToken,
+		RefreshToken: t.RefreshToken,
+		UserID:       t.UserID,
+		UserName:     t.UserName,
+	}
+	c.mu.Unlock()
+	return c.Save()
 }
