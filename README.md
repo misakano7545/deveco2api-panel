@@ -60,6 +60,15 @@ curl http://127.0.0.1:10102/v1/models -H "Authorization: Bearer <server.api_key>
 `deveco.keepalive_hours`（token 保活间隔，0=关）、`deveco.thinking_models`（流式思维链剥离清单）、
 `server.api_key`（本地 API 密钥）。token 由登录流程自动写入 `deveco.auth`。
 
+## 免费通道（官方口径）
+
+华为账号登录后即可使用内置免费模型通道：当前为 **GLM-5.1** 与 **GLM-5.3**，单账号
+**50 次请求/分钟**，不设月度总量上限，运行在华为昇腾算力上。
+
+这层"每分钟 50 次"之外，实测还有一层**新建会话**节流：短时间连发会返回
+`UserSessionLimitExceeded`（本代理统一转成 HTTP 429，冷却约 40 秒）。批量脚本按 ≥6 秒/次
+的间隔更稳。
+
 ## 登录
 
 登录是一次性动作，走 `deveco2api-login`；网关启动时也可用 `./deveco2api-panel --login`
