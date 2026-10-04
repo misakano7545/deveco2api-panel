@@ -17,6 +17,8 @@
     "user_agent": "deveco/0.2.0",
     "keepalive_hours": 6.0,
     "thinking_models": ["GLM-5.3"],
+    "session_reuse": false,
+    "session_ttl_minutes": 30,
     "auth": {
       "jwt_token": "",
       "access_token": "",

@@ -29,18 +29,27 @@ type AuthConfig struct {
 
 // DevEcoConfig 上游段。
 type DevEcoConfig struct {
-	BaseURL           string     `json:"base_url"`
-	AuthURL           string     `json:"auth_url"`
-	TempTokenCheckURL string     `json:"temp_token_check_url"`
-	JWTTokenCheckURL  string     `json:"jwt_token_check_url"`
-	AppID             string     `json:"app_id"`
-	CallbackPort      int        `json:"callback_port"`
-	Model             string     `json:"model"`
-	Client            string     `json:"client"`
-	Project           string     `json:"project"`
-	UserAgent         string     `json:"user_agent"`
-	KeepaliveHours    float64    `json:"keepalive_hours"`
-	ThinkingModels    []string   `json:"thinking_models"`
+	BaseURL           string   `json:"base_url"`
+	AuthURL           string   `json:"auth_url"`
+	TempTokenCheckURL string   `json:"temp_token_check_url"`
+	JWTTokenCheckURL  string   `json:"jwt_token_check_url"`
+	AppID             string   `json:"app_id"`
+	CallbackPort      int      `json:"callback_port"`
+	Model             string   `json:"model"`
+	Client            string   `json:"client"`
+	Project           string   `json:"project"`
+	UserAgent         string   `json:"user_agent"`
+	KeepaliveHours    float64  `json:"keepalive_hours"`
+	ThinkingModels    []string `json:"thinking_models"`
+	// SessionReuse 客户端未带 session_id 时复用同一个上游会话。
+	//
+	// 实测（v0.1.0）：上游真正会拦的是「新建会话」——约 5 次/分就 429
+	// (UserSessionLimitExceeded)，而同一会话内连发 64 次（8 并发 / 17s）全 200。
+	// 官方口径的 50 次/分是请求配额，不是新会话配额。true 时未带 session_id 的请求
+	// 共用一个会话（按 session_ttl_minutes 轮换），把实际可用速率从 ~5 次/分提到
+	// 上游请求配额量级；false 保持「每请求新会话」的老行为。
+	SessionReuse      bool       `json:"session_reuse"`
+	SessionTTLMinutes int        `json:"session_ttl_minutes"`
 	Auth              AuthConfig `json:"auth"`
 }
 

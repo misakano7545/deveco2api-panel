@@ -77,6 +77,9 @@ func wire(cfg *config.Config, cfgPath, listen string) *services {
 			Auth:           store,
 			Panel:          console,
 			KeepaliveHours: cfg.DevEco.KeepaliveHours,
+
+			SessionReuse:      cfg.DevEco.SessionReuse,
+			SessionTTLMinutes: cfg.DevEco.SessionTTLMinutes,
 		}),
 		console: console,
 		auth:    store,

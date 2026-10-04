@@ -189,12 +189,13 @@ func (m *mockUpstream) handler() http.Handler {
 // newTestServer mock 上游 + 真实网关（默认 6h 保活间隔）。
 func newTestServer(t *testing.T, m *mockUpstream) (*httptest.Server, *Handler, *config.Config) {
 	t.Helper()
-	return newTestServerWithKeepalive(t, m, 6.0)
+	return newTestServerWithKeepalive(t, m, 6.0, false)
 }
 
-// newTestServerWithKeepalive 同 newTestServer，保活间隔可指定（保活用例要秒级）。
+// newTestServerWithKeepalive 同 newTestServer，保活间隔与会话复用可指定
+// （保活用例要秒级；限流对照用例要切换 session_reuse）。
 // 装配方式与 cmd/server/wiring.go 一致：依赖在此注入，组件本身不认识配置文件。
-func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours float64) (*httptest.Server, *Handler, *config.Config) {
+func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours float64, sessionReuse bool) (*httptest.Server, *Handler, *config.Config) {
 	t.Helper()
 	up := httptest.NewServer(m.handler())
 	t.Cleanup(up.Close)
@@ -258,6 +259,7 @@ func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours fl
 		Auth:           store,
 		Panel:          console,
 		KeepaliveHours: cfg.DevEco.KeepaliveHours,
+		SessionReuse:   sessionReuse,
 	})
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
@@ -537,7 +539,7 @@ func TestRateLimitTranslations(t *testing.T) {
 
 func TestKeepaliveRefreshes(t *testing.T) {
 	m := newMock()
-	_, h, _ := newTestServerWithKeepalive(t, m, 0.0003) // ≈1.08s
+	_, h, _ := newTestServerWithKeepalive(t, m, 0.0003, false) // ≈1.08s
 	h.StartKeepalive()
 	defer h.StopKeepalive()
 
@@ -555,4 +557,51 @@ func TestKeepaliveRefreshes(t *testing.T) {
 	n := m.refreshCalls
 	m.mu.Unlock()
 	t.Fatalf("保活应至少触发 2 次刷新，实际 %d", n)
+}
+
+// TestSessionReuseStickySession 会话复用开关（实测：上游拦的是「新建会话」约 5 次/分，
+// 同一会话内连发 64 次全 200 —— 所以未带 session_id 时默认复用同一会话是可用性的关键）。
+func TestSessionReuseStickySession(t *testing.T) {
+	twoSessions := func(reuse bool) (string, string) {
+		m := newMock()
+		ts, _, _ := newTestServerWithKeepalive(t, m, 6.0, reuse)
+		for i := 0; i < 2; i++ {
+			code, raw := doJSON(t, "POST", ts.URL+"/v1/chat/completions", "test-key",
+				map[string]any{"model": "GLM-5.1", "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+			if code != 200 {
+				t.Fatalf("请求应 200，实际 %d %s", code, raw)
+			}
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if len(m.chatHeaders) < 2 {
+			t.Fatalf("mock 只记录到 %d 次请求", len(m.chatHeaders))
+		}
+		return m.chatHeaders[0]["session-id"], m.chatHeaders[1]["session-id"]
+	}
+
+	if a, b := twoSessions(false); a == b {
+		t.Fatalf("关闭复用时两次会话应不同，实际都是 %s", a)
+	}
+	if c, d := twoSessions(true); c != d {
+		t.Fatalf("开启复用时两次会话应相同，实际 %s != %s", c, d)
+	}
+
+	// 客户端显式带 session_id 时优先用它（复用开关不干扰会话隔离）
+	m := newMock()
+	ts, _, _ := newTestServerWithKeepalive(t, m, 6.0, true)
+	for _, sid := range []string{"cli-a", "cli-b"} {
+		code, raw := doJSON(t, "POST", ts.URL+"/v1/chat/completions", "test-key",
+			map[string]any{"model": "GLM-5.1", "session_id": sid,
+				"messages": []any{map[string]any{"role": "user", "content": "hi"}}})
+		if code != 200 {
+			t.Fatalf("请求应 200，实际 %d %s", code, raw)
+		}
+	}
+	m.mu.Lock()
+	hdr := append([]map[string]string{}, m.chatHeaders...)
+	m.mu.Unlock()
+	if hdr[0]["session-id"] != "cli-a" || hdr[1]["session-id"] != "cli-b" {
+		t.Fatalf("显式 session_id 未被沿用: %v %v", hdr[0]["session-id"], hdr[1]["session-id"])
+	}
 }

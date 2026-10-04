@@ -32,7 +32,14 @@ type Config struct {
 	Auth           *auth.Store
 	Panel          http.Handler // nil = 不挂载 /panel/
 	KeepaliveHours float64      // <=0 不启用保活
+	// SessionReuse 未带 session_id 的请求复用同一上游会话（见 config.DevEcoConfig.SessionReuse）。
+	SessionReuse      bool
+	SessionTTLMinutes int // <=0 用 stickySessionTTLDefault
 }
+
+// stickySessionTTLDefault 复用会话的默认轮换间隔：会话是上游的配额桶，
+// 长会话无实测风险但也无收益，按小时级轮换让它自然回收。
+const stickySessionTTLDefault = 30 * time.Minute
 
 // Handler 网关 handler。
 type Handler struct {
@@ -41,6 +48,11 @@ type Handler struct {
 
 	chatMu  sync.Mutex
 	chatIDs map[string]string // session_id → chat-id（同一会话沿用同一 chat-id）
+
+	// stickyID/stickyAt 复用中的上游会话（SessionReuse 时用）；stickyMu 保护。
+	stickyMu sync.Mutex
+	stickyID string
+	stickyAt time.Time
 
 	stop      chan struct{}
 	startedAt time.Time
@@ -127,6 +139,32 @@ func (h *Handler) chatIDFor(sessionID string) string {
 	id := session.ChatID()
 	h.chatIDs[sessionID] = id
 	return id
+}
+
+// sessionIDFor 决定本次请求用的上游会话：客户端显式给了 session_id 就用它的；
+// 否则按 SessionReuse 决定是复用同一个会话（默认，避免撞「新建会话」限流）
+// 还是每请求新开一个（老行为）。
+func (h *Handler) sessionIDFor(req map[string]any) string {
+	if sid := jsonval.Str(req["session_id"]); sid != "" {
+		return sid
+	}
+	if !h.cfg.SessionReuse {
+		return session.SessionID()
+	}
+	ttl := stickySessionTTLDefault
+	if h.cfg.SessionTTLMinutes > 0 {
+		ttl = time.Duration(h.cfg.SessionTTLMinutes) * time.Minute
+	}
+	h.stickyMu.Lock()
+	defer h.stickyMu.Unlock()
+	if h.stickyID == "" || time.Since(h.stickyAt) >= ttl {
+		old := h.stickyID
+		h.stickyID, h.stickyAt = session.SessionID(), time.Now()
+		if old != "" {
+			logfmt.Infof("复用会话轮换: %s → %s", old, h.stickyID)
+		}
+	}
+	return h.stickyID
 }
 
 // ---------------------------------------------------------------- 保活
@@ -240,10 +278,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stream, _ := req["stream"].(bool)
-	sessionID := jsonval.Str(req["session_id"])
-	if sessionID == "" {
-		sessionID = session.SessionID()
-	}
+	sessionID := h.sessionIDFor(req)
 	msgID := session.MessageID()
 	body := h.cfg.Upstream.BuildBody(req)
 	logfmt.Infof("POST %s model=%s stream=%v", h.cfg.Upstream.URL(stream), jsonval.Str(body["model"]), stream)
