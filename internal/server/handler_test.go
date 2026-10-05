@@ -224,6 +224,7 @@ func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours fl
 		UserAgent:      cfg.DevEco.UserAgent,
 		Model:          cfg.DevEco.Model,
 		ThinkingModels: cfg.DevEco.ThinkingModels,
+		VisionModels:   cfg.DevEco.VisionModels,
 		Token:          func() string { return store.Tokens().AccessToken },
 	})
 
@@ -535,6 +536,52 @@ func TestRateLimitTranslations(t *testing.T) {
 		map[string]any{"model": "GLM-5.1", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}); code != 429 {
 		t.Fatalf("非流式 200+error 应转 429，实际 %d %s", code, raw)
 	}
+}
+
+// TestVisionPassthrough 图片入站：vision_models 命中的模型 content 数组透传，
+// 其余模型仍降级成 "[image: url]" 文本（实测 GLM-5.1/5.3 带图一律 403 ModelServiceError）。
+func TestVisionPassthrough(t *testing.T) {
+	m := newMock()
+	ts, _, _ := newTestServer(t, m)
+
+	imgMsg := []any{
+		map[string]any{"type": "text", "text": "这张图什么颜色"},
+		map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgo="}},
+	}
+	sentContent := func(model string) any {
+		code, raw := doJSON(t, "POST", ts.URL+"/v1/chat/completions", "test-key",
+			map[string]any{"model": model, "messages": []any{map[string]any{"role": "user", "content": imgMsg}}})
+		if code != 200 {
+			t.Fatalf("请求应 200，实际 %d %s", code, raw)
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		req := m.chatNoStream[len(m.chatNoStream)-1]
+		msgs, _ := req["messages"].([]any)
+		if len(msgs) == 0 {
+			t.Fatalf("上游请求缺 messages: %v", req)
+		}
+		return msgs[0].(map[string]any)["content"]
+	}
+
+	if c := sentContent("Qwen3_VL_235B_A22B_Instruct"); !isContentArray(c) {
+		t.Fatalf("视觉模型应透传 content 数组，实际 %T %v", c, c)
+	}
+	c := sentContent("GLM-5.1")
+	s, ok := c.(string)
+	if !ok || !strings.Contains(s, "[image: data:image/png;base64,") {
+		t.Fatalf("非视觉模型应降级为文本，实际 %T %v", c, c)
+	}
+}
+
+// isContentArray 判断上游收到的 content 是否为结构化数组（multimodal 透传形态）。
+func isContentArray(c any) bool {
+	arr, ok := c.([]any)
+	if !ok || len(arr) != 2 {
+		return false
+	}
+	part, _ := arr[1].(map[string]any)
+	return part != nil && part["type"] == "image_url"
 }
 
 func TestKeepaliveRefreshes(t *testing.T) {

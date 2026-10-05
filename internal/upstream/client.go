@@ -24,6 +24,9 @@ type Config struct {
 	UserAgent      string
 	Model          string   // 默认模型（请求未指定 model 时）
 	ThinkingModels []string // 需要剥离思维链的模型（上游把思维链混在 content 里）
+	// VisionModels 收图的模型：命中时多模态 content 数组原样透传（实测只有 Qwen3-VL 收图，
+	// GLM-5.1/5.3 带图 403 ModelServiceError，所以其余模型仍降级成文本）。
+	VisionModels []string
 	// Token 返回当前 access_token（每次请求现取，保活/刷新后立即生效）。
 	Token func() string
 	// HTTP 出站客户端；nil 时用 300s 超时的默认客户端（上游单次生成可达数分钟）。
@@ -53,6 +56,17 @@ func (c *Client) DefaultModel() string { return c.cfg.Model }
 // StripsThinking 该模型是否需要剥离思维链（thinking_models 配置）。
 func (c *Client) StripsThinking(model string) bool {
 	for _, m := range c.cfg.ThinkingModels {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}
+
+// VisionModel 该模型是否收图（vision_models 配置）。命中时多模态 content 数组原样透传，
+// 其余模型仍把图片降级成 "[image: url]" 文本 —— 实测 GLM-5.1/5.3 带图一律 403。
+func (c *Client) VisionModel(model string) bool {
+	for _, m := range c.cfg.VisionModels {
 		if m == model {
 			return true
 		}

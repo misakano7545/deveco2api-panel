@@ -43,6 +43,7 @@ func wire(cfg *config.Config, cfgPath, listen string) *services {
 		UserAgent:      cfg.DevEco.UserAgent,
 		Model:          cfg.DevEco.Model,
 		ThinkingModels: cfg.DevEco.ThinkingModels,
+		VisionModels:   cfg.DevEco.VisionModels,
 		Token:          func() string { return store.Tokens().AccessToken },
 	})
 

@@ -26,7 +26,7 @@ func (c *Client) BuildBody(req map[string]any) map[string]any {
 
 	body := map[string]any{
 		"model":      model,
-		"messages":   normalizeMessages(msgsRaw),
+		"messages":   normalizeMessages(msgsRaw, c.VisionModel(model)),
 		"max_tokens": maxTokens,
 		"stream":     stream,
 	}
@@ -64,9 +64,10 @@ func (c *Client) BuildBody(req map[string]any) map[string]any {
 	return body
 }
 
-// normalizeMessages 归一消息列表：多模态 content 数组压成纯文本
-// （图片降级为 [image: url]，上游对话接口不吃结构化 content）。
-func normalizeMessages(messages []any) []map[string]any {
+// normalizeMessages 归一消息列表：默认把多模态 content 数组压成纯文本
+// （图片降级为 [image: url]，GLM 系上游不吃结构化 content）；
+// keepVision=true（模型在 vision_models 里）时保留数组原样透传。
+func normalizeMessages(messages []any, keepVision bool) []map[string]any {
 	out := []map[string]any{}
 	for _, m := range messages {
 		mm, _ := m.(map[string]any)
@@ -81,7 +82,7 @@ func normalizeMessages(messages []any) []map[string]any {
 		if !hasContent {
 			content = ""
 		}
-		if parts, ok := content.([]any); ok {
+		if parts, ok := content.([]any); ok && !keepVision {
 			var texts []string
 			for _, p := range parts {
 				pm, _ := p.(map[string]any)

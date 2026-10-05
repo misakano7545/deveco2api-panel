@@ -41,6 +41,10 @@ type DevEcoConfig struct {
 	UserAgent         string   `json:"user_agent"`
 	KeepaliveHours    float64  `json:"keepalive_hours"`
 	ThinkingModels    []string `json:"thinking_models"`
+	// VisionModels 收图的模型（多模态 content 数组原样透传）。实测：只有
+	// Qwen3_VL_235B_A22B_Instruct 能吃 image_url（data URL 也行）；GLM-5.1/5.3 带图
+	// 直接 403 ModelServiceError，所以它们仍降级成 "[image: url]" 文本。
+	VisionModels []string `json:"vision_models"`
 	// SessionReuse 客户端未带 session_id 时复用同一个上游会话。
 	//
 	// 实测（v0.1.0）：上游真正会拦的是「新建会话」——约 5 次/分就 429
@@ -92,6 +96,7 @@ func Default() *Config {
 			UserAgent:         "deveco/0.2.0",
 			KeepaliveHours:    6.0,
 			ThinkingModels:    []string{"GLM-5.3"},
+			VisionModels:      []string{"Qwen3_VL_235B_A22B_Instruct"},
 		},
 		Logging: LoggingConfig{Level: "INFO"},
 	}
