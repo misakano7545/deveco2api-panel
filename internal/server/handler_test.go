@@ -19,6 +19,7 @@ import (
 	"github.com/misakano7545/deveco2api-panel/internal/jsonval"
 	"github.com/misakano7545/deveco2api-panel/internal/logfmt"
 	"github.com/misakano7545/deveco2api-panel/internal/panel"
+	"github.com/misakano7545/deveco2api-panel/internal/reqlog"
 	"github.com/misakano7545/deveco2api-panel/internal/upstream"
 )
 
@@ -230,6 +231,9 @@ func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours fl
 
 	ring := panel.NewRing(500)
 	logfmt.SetSink(ring.Add) // 面板日志接口读这个环
+	// 请求记录：与 cmd/server/wiring.go 同口径（内存指标 + 归档）。
+	reqLog := reqlog.New(reqlog.Config{})
+	t.Cleanup(reqLog.Close)
 	console := panel.New(panel.Config{
 		Version:        "test",
 		APIKey:         cfg.Server.APIKey,
@@ -242,6 +246,7 @@ func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours fl
 		Auth:           store,
 		Upstream:       upc,
 		Logs:           ring,
+		RequestLog:     reqLog,
 		// 与 cmd/server/wiring.go 同口径：导入 = 换内存 token + 落盘，回显旧身份
 		ImportAuth: func(t auth.Tokens) (auth.Tokens, error) {
 			prev := store.Tokens()
@@ -261,6 +266,9 @@ func newTestServerWithKeepalive(t *testing.T, m *mockUpstream, keepaliveHours fl
 		Panel:          console,
 		KeepaliveHours: cfg.DevEco.KeepaliveHours,
 		SessionReuse:   sessionReuse,
+
+		RequestLog:       reqLog,
+		RecordClientInfo: true,
 	})
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)

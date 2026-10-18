@@ -48,6 +48,7 @@ func main() {
 	listen := fmt.Sprintf("%s:%d", h, p)
 
 	svc := wire(cfg, abs, listen)
+	defer svc.reqlog.Close() // 刷盘并停归档协程（进程退出前）
 
 	t := svc.auth.Tokens()
 	if t.AccessToken == "" && t.JWTToken == "" {

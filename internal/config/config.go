@@ -64,9 +64,16 @@ type ServerConfig struct {
 	APIKey string `json:"api_key"`
 }
 
-// LoggingConfig 日志段。
+// LoggingConfig 日志段。请求记录的三个归档参数与 workbuddy2api-panel 同名同默认
+// （缺省开启、保留 7 天、总量 100 MiB）：面板「日志」页的请求记录表读的就是它。
+// RequestClientInfo 决定是否记录调用来源（IP / User-Agent）——比 token 计数敏感，
+// 关掉即归档里不出现来源字段。
 type LoggingConfig struct {
-	Level string `json:"level"`
+	Level                 string `json:"level"`
+	RequestArchiveEnabled bool   `json:"request_archive_enabled"`
+	RequestRetentionDays  int    `json:"request_retention_days"`
+	RequestArchiveMaxMB   int    `json:"request_archive_max_mb"`
+	RequestClientInfo     bool   `json:"request_client_info"`
 }
 
 // Config 全量配置。path/mu 是运行期字段，不参与序列化。
@@ -98,7 +105,13 @@ func Default() *Config {
 			ThinkingModels:    []string{"GLM-5.3"},
 			VisionModels:      []string{"Qwen3_VL_235B_A22B_Instruct"},
 		},
-		Logging: LoggingConfig{Level: "INFO"},
+		Logging: LoggingConfig{
+			Level:                 "INFO",
+			RequestArchiveEnabled: true,
+			RequestRetentionDays:  7,
+			RequestArchiveMaxMB:   100,
+			RequestClientInfo:     true,
+		},
 	}
 }
 

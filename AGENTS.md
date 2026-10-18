@@ -13,6 +13,7 @@ internal/jsonval/    上游 JSON 取值 / 序列化 helper（nil 安全、不转
 internal/logfmt/     日志行格式 [HH:MM:SS][LEVEL] msg + 面板日志 sink
 internal/panel/      内嵌控制台 index.html / app.js / index.go / panel.go / ring.go
 internal/relay/      无头登录中继（反代华为登录页、改写回调、cloudflared 隧道）
+internal/reqlog/     请求记录：进程内指标 + 脱敏 JSONL 归档（面板「日志」页数据源）
 internal/server/     网关 HTTP 表面 /v1/*（并挂载 /panel/）
 internal/session/    会话 / 消息 ID 生成（对齐官方客户端 id.ts）
 internal/upstream/   上游客户端：请求体构造、SSE 转发、思维链剥离、错误转译
@@ -33,6 +34,8 @@ internal/upstream/   上游客户端：请求体构造、SSE 转发、思维链�
   不向面板发任何请求；搬运由人手动粘贴（一次一个方向，不引入第二条第写路径）。
 - **日志一律 `logfmt.Infof/Warnf/Errorf`**：stdout 是持久出口，面板环形缓冲只是观测窗口
   （进程重启即空，不落盘）。
+- **请求记录只记元数据**：`internal/reqlog` 不写提示词、响应正文、Authorization 或其它凭证；
+  来源 IP / UA 是否落盘由 `logging.request_client_info` 控制（默认开，可关）。
 
 ## 测试
 

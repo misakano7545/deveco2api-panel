@@ -20,6 +20,7 @@ internal/jsonval/    JSON 取值/序列化 helper
 internal/logfmt/     日志行格式 + 面板日志 sink
 internal/panel/      内嵌控制台（index.html / app.js / index.go / panel.go / ring.go）
 internal/relay/      无头登录中继
+internal/reqlog/     请求记录：进程内指标 + 脱敏 JSONL 归档（面板「日志」页数据源）
 internal/server/     网关 HTTP 表面 /v1/*（挂载 /panel/）
 internal/session/    会话/消息 ID 生成
 internal/upstream/   上游客户端：请求体构造、SSE 转发、思维链剥离、错误转译
@@ -46,6 +47,7 @@ go build -o deveco2api-login ./cmd/login
 | `POST /v1/chat/completions` | OpenAI 兼容对话；`stream: true` 走 SSE |
 | `GET /v1/models` | 当前账号可见模型 |
 | `GET /panel/` | Web 控制台（概览 / 模型 / 日志 / 导入） |
+| `GET /panel/api/request_logs` | 请求记录（脱敏元数据；`?limit=` 最多 1000） |
 | `POST /panel/api/import/config` | 导入账号凭证（见「图形登录器」） |
 | `GET /health` | 存活探针 |
 
@@ -59,6 +61,20 @@ curl http://127.0.0.1:10102/v1/models -H "Authorization: Bearer <server.api_key>
 配置项与 Python 版一一对应，见 `config.example.json`：
 `deveco.keepalive_hours`（token 保活间隔，0=关）、`deveco.thinking_models`（流式思维链剥离清单）、
 `server.api_key`（本地 API 密钥）。token 由登录流程自动写入 `deveco.auth`。
+
+## 请求记录
+
+「日志」页上半部分是请求记录表（时间 / 结果 / 模型 / 来源 IP / User-Agent / 耗时 / Token / 请求 ID），
+与 workbuddy2api-panel 同口径：只记**脱敏元数据**，不写提示词、响应正文与凭证。
+指标常驻内存；JSONL 归档写在配置文件同级的 `request-logs/`（按天分片、保留 7 天、总量 100 MiB 上限），
+进程重启后仍能翻历史。相关配置：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `logging.request_archive_enabled` | `true` | 关掉只留进程内最近 100 条 |
+| `logging.request_retention_days` | `7` | 归档保留天数 |
+| `logging.request_archive_max_mb` | `100` | 归档总量上限（MiB） |
+| `logging.request_client_info` | `true` | 是否记录来源 IP / UA（关掉即不落盘） |
 
 ## 免费通道（官方口径 + 实测）
 

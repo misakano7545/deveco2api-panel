@@ -152,6 +152,22 @@ input:focus { outline: none; border-color: var(--accent); }
 .imp .row { display: flex; gap: 10px; align-items: center; margin-top: 11px; }
 .imp .row .grow { flex: 1; }
 .imp .tip { color: var(--ink-3); font-size: 12px; margin: 12px 0 0; }
+
+/* 请求记录（日志页上半部分）：沿用 .acc，表更紧凑、来源列单行截断 */
+.box .stats { margin: 0; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; box-shadow: none; }
+.fbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 17px;
+  border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
+.fbar > input, .fbar > select { width: auto; padding: 5px 10px; font-size: 12.5px; border-radius: 6px; }
+.fbar > input[type=search] { min-width: 200px; flex: 0 1 280px; }
+.fbar .grow { flex: 1; }
+.fbar .note { color: var(--ink-3); font-size: 12px; }
+.acc.req { min-width: 900px; }
+.acc.req th, .acc.req td { padding: 8px 10px; }
+.req-wrap { max-height: 420px; overflow: auto; }
+.req-wrap thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.clip { display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip.ip { max-width: 140px; font-family: var(--mono); font-size: 12.5px; }
+.clip.rid { max-width: 150px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
 </style>
 </head>
 <body>
@@ -230,6 +246,36 @@ input:focus { outline: none; border-color: var(--accent); }
 
     <!-- 日志 -->
     <section class="view" id="view-logs" hidden>
+      <div class="box">
+        <header>
+          <h3>请求记录 <span class="hint">只记元数据，不含提示词与响应正文</span></h3>
+          <span class="grow"></span>
+          <span class="note" id="reqNote">—</span>
+          <select id="reqLimit" aria-label="读取条数">
+            <option value="100" selected>最近 100 条</option>
+            <option value="300">最近 300 条</option>
+            <option value="1000">最近 1000 条</option>
+          </select>
+          <button id="btnReqReload">重新读取</button>
+        </header>
+        <div class="stats" id="reqStats"></div>
+        <div class="fbar">
+          <input id="reqQ" type="search" placeholder="搜索 IP / UA / 模型 / 请求 ID" aria-label="搜索请求记录">
+          <select id="reqOutcome" aria-label="按结果筛选">
+            <option value="">全部结果</option>
+            <option value="success">成功</option>
+            <option value="http_error">HTTP 错误</option>
+          </select>
+          <span class="grow"></span>
+          <span class="note" id="reqCount">—</span>
+        </div>
+        <div class="tbl-wrap req-wrap">
+          <table class="acc req">
+            <thead><tr><th>时间</th><th>结果</th><th>模型</th><th>来源 IP</th><th>User-Agent</th><th class="num">耗时</th><th class="num">Token</th><th>请求 ID</th></tr></thead>
+            <tbody id="reqBody"><tr><td colspan="8" class="empty">加载中…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="box">
         <header>
           <h3>运行日志 <span class="hint">进程内最近 500 行</span></h3>

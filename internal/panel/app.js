@@ -97,7 +97,7 @@ function switchView(v) {
   loadStatus(); // 页脚状态/版本/密钥按钮随任意视图初始化（深链 #models/#logs 不再停在「连接中」）
   if (v === 'status') { statusTimer = setInterval(loadStatus, 5000); }
   if (v === 'models') loadModels();
-  if (v === 'logs') { loadLogs(); logsTimer = setInterval(loadLogs, 3000); }
+  if (v === 'logs') { loadLogs(); loadRequestLogs(); logsTimer = setInterval(loadLogs, 3000); }
   if (v === 'import') loadCurrentAccount();
   closeNav();
 }
@@ -203,7 +203,11 @@ async function loadModels() {
   }
 }
 $('btnModels').onclick = loadModels;
-$('btnRefresh').onclick = () => { if (view === 'models') loadModels(); else if (view === 'logs') loadLogs(); else loadStatus(); };
+$('btnRefresh').onclick = () => {
+  if (view === 'models') loadModels();
+  else if (view === 'logs') { loadLogs(); loadRequestLogs(); }
+  else loadStatus();
+};
 
 // ── 日志
 async function loadLogs() {
@@ -224,6 +228,116 @@ async function loadLogs() {
 }
 $('btnLogs').onclick = loadLogs;
 $('btnLogPin').onclick = () => { logPin = !logPin; $('btnLogPin').textContent = '自动滚动：' + (logPin ? '开' : '关'); };
+
+// ── 请求记录（日志页上半部分；读 /panel/api/request_logs）
+// 筛选在前端做：一次最多 1000 行，重渲染比再打一轮归档读取便宜。
+let reqEntries = [];
+const reqFilter = { q: '', outcome: '' };
+
+const OUTCOME_CN = { success: '成功', http_error: 'HTTP 错误', stream_error: '流错误', interrupted: '中断' };
+
+function fmtMs(ms) {
+  const n = Number(ms || 0);
+  if (!n) return '—';
+  return n >= 1000 ? (n / 1000).toFixed(2) + 's' : Math.round(n) + 'ms';
+}
+function fmtTok(n) {
+  const v = Number(n || 0);
+  if (!v) return '—';
+  return v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(v);
+}
+function fmtBytes(n) {
+  const v = Number(n || 0);
+  if (!v) return '0 B';
+  return v >= 1048576 ? (v / 1048576).toFixed(1) + ' MB' : Math.round(v / 1024) + ' KB';
+}
+function cellClip(text, cls) {
+  const td = el('td');
+  if (!text) { td.append(el('span', null, '—')); return td; }
+  const s = el('span', 'clip' + (cls ? ' ' + cls : ''), text);
+  s.title = text;
+  td.append(s);
+  return td;
+}
+
+async function loadRequestLogs() {
+  $('reqNote').textContent = '读取中…';
+  try {
+    const d = await api('/panel/api/request_logs?limit=' + $('reqLimit').value);
+    reqEntries = d.entries || [];
+    renderReqStats(d.stats || {}, d.archive || {});
+    renderReqTable();
+  } catch (e) {
+    $('reqNote').textContent = '读取失败：' + e.message;
+  }
+}
+
+function renderReqStats(st, ar) {
+  const box = $('reqStats');
+  box.textContent = '';
+  const cells = [
+    [String(st.completed || 0), '请求数', ''],
+    [st.completed ? Number(st.success_rate || 0).toFixed(1) + '%' : '—', '成功率', st.failed ? 'warn' : 'good'],
+    [String(st.failed || 0), '失败', st.failed ? 'bad' : ''],
+    [st.completed ? fmtMs(st.avg_duration_ms) : '—', '平均耗时', ''],
+  ];
+  cells.forEach(([v, k, cls]) => {
+    const d = el('div', 'stat' + (cls ? ' ' + cls : ''));
+    d.append(el('div', 'v', v), el('div', 'k', k));
+    box.append(d);
+  });
+  const when = '更新于 ' + new Date().toLocaleTimeString();
+  $('reqNote').textContent = when + (ar.enabled ? ' · 归档 ' + ar.files + ' 文件 / ' + fmtBytes(ar.bytes) : ' · 归档已关闭');
+  $('reqNote').title = ar.enabled ? String(ar.dir || '') : '只保留进程内最近 100 条，重启即清空';
+}
+
+function reqMatch(e) {
+  if (reqFilter.outcome && e.outcome !== reqFilter.outcome) return false;
+  const q = reqFilter.q.toLowerCase();
+  if (!q) return true;
+  return [e.client_ip, e.user_agent, e.model, e.request_id].some((v) => String(v || '').toLowerCase().includes(q));
+}
+
+function renderReqTable() {
+  const body = $('reqBody');
+  body.textContent = '';
+  const list = reqEntries.filter(reqMatch);
+  list.forEach((e) => {
+    const tr = el('tr');
+    tr.append(el('td', 'num', e.time ? new Date(e.time).toLocaleTimeString('zh-CN', { hour12: false }) : '—'));
+    const cRes = el('td');
+    cRes.append(tag((e.status || '—') + ' ' + (OUTCOME_CN[e.outcome] || e.outcome || '—'),
+      e.outcome === 'success' ? 'ok' : 'bad'));
+    tr.append(cRes);
+    tr.append(el('td', null, e.model || '—'));
+    tr.append(cellClip(e.client_ip, 'ip'));
+    tr.append(cellClip(e.user_agent, ''));
+    tr.append(el('td', 'num', fmtMs(e.duration_ms)));
+    tr.append(el('td', 'num', fmtTok(e.total_tokens || (Number(e.prompt_tokens || 0) + Number(e.completion_tokens || 0)))));
+    tr.append(cellClip(e.request_id, 'rid'));
+    body.append(tr);
+  });
+  if (!list.length) {
+    const td = el('td', 'empty', reqEntries.length ? '没有符合当前筛选条件的请求记录' : '暂无请求记录');
+    td.colSpan = 8;
+    const tr = el('tr');
+    tr.append(td);
+    body.append(tr);
+  }
+  const filtered = list.length !== reqEntries.length;
+  $('reqCount').textContent = reqEntries.length
+    ? (filtered ? '命中 ' + list.length + ' / ' + reqEntries.length + ' 条' : reqEntries.length + ' 条')
+    : '';
+}
+
+let reqQTimer = null;
+$('reqQ').oninput = () => {
+  clearTimeout(reqQTimer);
+  reqQTimer = setTimeout(() => { reqFilter.q = $('reqQ').value.trim(); renderReqTable(); }, 150);
+};
+$('reqOutcome').onchange = () => { reqFilter.outcome = $('reqOutcome').value; renderReqTable(); };
+$('reqLimit').onchange = loadRequestLogs;
+$('btnReqReload').onclick = loadRequestLogs;
 
 // ── 导入（把登录器产出的凭证块粘进来；面板唯一的写入口，只换账号凭证）
 async function apiPost(path, body) {

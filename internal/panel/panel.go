@@ -18,6 +18,7 @@ import (
 	"github.com/misakano7545/deveco2api-panel/internal/auth"
 	"github.com/misakano7545/deveco2api-panel/internal/httpauth"
 	"github.com/misakano7545/deveco2api-panel/internal/jsonval"
+	"github.com/misakano7545/deveco2api-panel/internal/reqlog"
 	"github.com/misakano7545/deveco2api-panel/internal/upstream"
 )
 
@@ -35,6 +36,10 @@ type Config struct {
 	Auth     *auth.Store      // 账号信息与最近刷新状态
 	Upstream *upstream.Client // 模型列表实时查询
 	Logs     *Ring            // nil = New 内部建一个（仅测试会这样用）
+
+	// RequestLog 请求记录（指标 + JSONL 归档）。nil = 本实例不记录，
+	// 「日志」页的请求记录表回 501。
+	RequestLog *reqlog.Recorder
 
 	// ImportAuth 导入凭证（cmd 注入：换内存 token + 落盘，返回被替换的旧身份）。
 	// nil = 本实例未启用导入（接口回 501）。这是面板唯一的写入口。
@@ -75,6 +80,7 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/status", p.withAuth(p.status))
 	p.mux.HandleFunc("GET /panel/api/models", p.withAuth(p.models))
 	p.mux.HandleFunc("GET /panel/api/logs", p.withAuth(p.logsHandler))
+	p.mux.HandleFunc("GET /panel/api/request_logs", p.withAuth(p.requestLogs))
 	p.mux.HandleFunc("POST /panel/api/import/config", p.withAuth(p.importConfig))
 }
 
@@ -187,6 +193,44 @@ func (p *Panel) logsHandler(w http.ResponseWriter, r *http.Request) {
 		limit = v
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"lines": p.logs.Snapshot(limit)})
+}
+
+// requestLogs 请求记录（「日志」页上半部分）：最近 N 条脱敏元数据 + 进程内指标。
+//
+// 归档关闭时回落到内存里的最近 100 条——否则表会空着，看着像记录坏了。
+func (p *Panel) requestLogs(w http.ResponseWriter, r *http.Request) {
+	if p.cfg.RequestLog == nil {
+		writeErr(w, http.StatusNotImplemented, "request logger not available")
+		return
+	}
+	limit := 200
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
+		limit = v
+	}
+	rows, err := p.cfg.RequestLog.ReadArchive(limit, reqlog.Filter{})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	snap := p.cfg.RequestLog.Snapshot()
+	if len(rows) == 0 && !snap.Archive.Enabled {
+		rows = snap.Recent
+	}
+	if rows == nil {
+		rows = []reqlog.Event{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries": rows,
+		"limit":   limit,
+		"stats": map[string]any{
+			"completed":       snap.Completed,
+			"failed":          snap.Failed,
+			"success_rate":    snap.SuccessRate,
+			"avg_duration_ms": snap.AvgDurationMs,
+			"in_flight":       snap.InFlight,
+		},
+		"archive": snap.Archive,
+	})
 }
 
 // writeJSON/writeErr 面板响应 helper（与网关同口径：不转义 < > &）。

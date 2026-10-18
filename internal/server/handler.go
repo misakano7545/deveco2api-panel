@@ -19,6 +19,7 @@ import (
 	"github.com/misakano7545/deveco2api-panel/internal/httpauth"
 	"github.com/misakano7545/deveco2api-panel/internal/jsonval"
 	"github.com/misakano7545/deveco2api-panel/internal/logfmt"
+	"github.com/misakano7545/deveco2api-panel/internal/reqlog"
 	"github.com/misakano7545/deveco2api-panel/internal/session"
 	"github.com/misakano7545/deveco2api-panel/internal/upstream"
 )
@@ -35,6 +36,11 @@ type Config struct {
 	// SessionReuse 未带 session_id 的请求复用同一上游会话（见 config.DevEcoConfig.SessionReuse）。
 	SessionReuse      bool
 	SessionTTLMinutes int // <=0 用 stickySessionTTLDefault
+	// RequestLog 请求指标与脱敏 JSONL 归档（nil = 不记录）。
+	RequestLog *reqlog.Recorder
+	// RecordClientInfo 是否记录调用来源（IP / User-Agent）——来源比 token 计数敏感，
+	// 由 logging.request_client_info 决定（关掉即归档里不出现来源字段）。
+	RecordClientInfo bool
 }
 
 // stickySessionTTLDefault 复用会话的默认轮换间隔：会话是上游的配额桶，
@@ -266,14 +272,20 @@ func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------- /v1/chat/completions
 
 func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
+	// 埋点：状态码由 statusRecorder 兜住，出口再多也只记一条。
+	tr := newTrace(r, "", h.cfg.RecordClientInfo)
+	sw := &statusRecorder{ResponseWriter: w}
+	h.cfg.RequestLog.Begin()
+	defer func() { h.cfg.RequestLog.Record(tr.event(sw.code())) }()
+
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		writeError(sw, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
 		return
 	}
 	var req map[string]any
 	if err := json.Unmarshal(raw, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		writeError(sw, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
 		return
 	}
 
@@ -281,12 +293,13 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	sessionID := h.sessionIDFor(req)
 	msgID := session.MessageID()
 	body := h.cfg.Upstream.BuildBody(req)
-	logfmt.Infof("POST %s model=%s stream=%v", h.cfg.Upstream.URL(stream), jsonval.Str(body["model"]), stream)
+	tr.model = jsonval.Str(body["model"])
+	logfmt.Infof("POST %s model=%s stream=%v", h.cfg.Upstream.URL(stream), tr.model, stream)
 
-	h.forward(w, sessionID, msgID, h.chatIDFor(sessionID), body, stream)
+	h.forward(sw, tr, sessionID, msgID, h.chatIDFor(sessionID), body, stream)
 }
 
-func (h *Handler) forward(w http.ResponseWriter, sessionID, msgID, chatID string, body map[string]any, stream bool) {
+func (h *Handler) forward(w http.ResponseWriter, tr *requestTrace, sessionID, msgID, chatID string, body map[string]any, stream bool) {
 	stripThinking := h.cfg.Upstream.StripsThinking(jsonval.Str(body["model"]))
 
 	post := func() (int, []byte, error) {
@@ -332,6 +345,7 @@ func (h *Handler) forward(w http.ResponseWriter, sessionID, msgID, chatID string
 			writeJSON(w, code, map[string]any{"error": e})
 			return
 		}
+		tr.setUsageFromSSE(string(raw))
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, upstream.TransformSSE(string(raw), stripThinking))
@@ -356,5 +370,6 @@ func (h *Handler) forward(w http.ResponseWriter, sessionID, msgID, chatID string
 		}
 	}
 	upstream.StripThinkingNonstream(data)
+	tr.setUsage(data["usage"])
 	writeJSON(w, http.StatusOK, data)
 }
