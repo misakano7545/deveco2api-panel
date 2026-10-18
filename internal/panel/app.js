@@ -43,17 +43,20 @@ async function api(path) {
 }
 
 // ── 密钥门禁（api_key 为空时不会触发）
+// 注意：后台轮询的 401 也会走到这里（每 5s 一次）。已打开时不能重置输入框，
+// 否则用户正在敲的密钥会被清空，提交上去永远「密钥不正确」。
 function showKeyGate(wrong) {
+  const wasOn = $('keyVeil').classList.contains('on');
   $('keyErr').hidden = !wrong;
   $('keyVeil').classList.add('on');
-  $('keyInput').value = '';
-  $('keyInput').focus();
+  if (!wasOn) { $('keyInput').value = ''; $('keyInput').focus(); }
 }
 $('btnKeyOk').onclick = async () => {
   apiKey = $('keyInput').value.trim();
   try {
     await api('/panel/api/status');
     localStorage.setItem(KEY_LS, apiKey);
+    $('keyErr').hidden = true;
     $('keyVeil').classList.remove('on');
     toast('已连接', 'ok');
     switchView(view);

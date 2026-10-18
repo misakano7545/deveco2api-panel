@@ -271,10 +271,10 @@ input:focus { outline: none; border-color: var(--accent); }
   <div class="dlg" style="width:420px">
     <header>
       <h3>需要访问密钥</h3>
-      <div class="hint">本服务已启用 api_key 鉴权，请输入 config.toml 中的 server.api_key。</div>
+      <div class="hint">该网关已启用 api_key 鉴权，请输入 config.json 中的 server.api_key。</div>
     </header>
     <div class="body">
-      <input type="password" id="keyInput" placeholder="api_key" autocomplete="current-password">
+      <input type="password" id="keyInput" placeholder="api_key" autocomplete="off">
       <div class="state err" id="keyErr" hidden style="margin-top:10px">密钥不正确，请重试。</div>
     </div>
     <footer>
