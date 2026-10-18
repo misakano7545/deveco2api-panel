@@ -49,14 +49,21 @@ func main() {
 
 	svc := wire(cfg, abs, listen)
 
-	if err := svc.auth.Ensure(time.Duration(*timeoutSec)*time.Second, *noBrowser); err != nil {
+	t := svc.auth.Tokens()
+	if t.AccessToken == "" && t.JWTToken == "" {
+		// 无凭证时不起交互登录（会阻塞等待回调）：先让面板与 /health 起来，
+		// 凭证由「导入」页粘贴后立即生效。
+		logfmt.Warnf("未配置凭证：跳过登录，仅提供面板与健康检查（打开 /panel/ 的「导入」页粘贴凭证）")
+	} else if err := svc.auth.Ensure(time.Duration(*timeoutSec)*time.Second, *noBrowser); err != nil {
 		logfmt.Errorf("认证失败: %v", err)
 		os.Exit(1)
 	}
 	if *loginOnly {
 		return
 	}
-	logfmt.Infof("access_token 已就绪: %s...", logfmt.Truncate(svc.auth.Tokens().AccessToken, 16))
+	if svc.auth.Tokens().AccessToken != "" {
+		logfmt.Infof("access_token 已就绪: %s...", logfmt.Truncate(svc.auth.Tokens().AccessToken, 16))
+	}
 
 	svc.gateway.StartKeepalive()
 	logfmt.Infof("启动 OpenAI 兼容 API: http://%s/v1/chat/completions", listen)
