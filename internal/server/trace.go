@@ -110,8 +110,13 @@ func intField(v any) int64 {
 	return 0
 }
 
-// clientIP 调用来源：代理头 X-Forwarded-For 首段，无代理头时回落 TCP 对端。
+// clientIP 调用来源：优先 CF-Connecting-IP（橙云后真实来源；此时 XFF 只剩边缘
+// 节点地址），其次 X-Forwarded-For 首段，最后回落 TCP 对端。
+// 前提与 XFF 相同：源站只经 Cloudflare / Caddy 入站。
 func clientIP(r *http.Request) string {
+	if ip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); ip != "" {
+		return ip
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
 			return first

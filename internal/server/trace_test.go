@@ -3,6 +3,7 @@ package server
 // trace_test.go — 请求记录埋点：面板「日志」页的请求记录表读的就是这些事件。
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/misakano7545/deveco2api-panel/internal/reqlog"
@@ -56,6 +57,23 @@ func TestChatRecordsFailureEvent(t *testing.T) {
 	e := onlyEvent(t, h)
 	if e.Status != 429 || e.OK || e.Outcome != reqlog.OutcomeHTTPError {
 		t.Fatalf("失败事件字段不对: %+v", e)
+	}
+}
+
+func TestClientIPPreference(t *testing.T) {
+	r := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	r.RemoteAddr = "10.0.0.9:5555"
+	if got := clientIP(r); got != "10.0.0.9" {
+		t.Fatalf("无代理头应回落 TCP 对端，得到 %q", got)
+	}
+	r.Header.Set("X-Forwarded-For", "1.2.3.4, 10.0.0.9")
+	if got := clientIP(r); got != "1.2.3.4" {
+		t.Fatalf("XFF 应取首段，得到 %q", got)
+	}
+	// 橙云后 XFF 只剩边缘节点，真实来源在 CF-Connecting-IP
+	r.Header.Set("CF-Connecting-IP", "5.6.7.8")
+	if got := clientIP(r); got != "5.6.7.8" {
+		t.Fatalf("应优先 CF-Connecting-IP，得到 %q", got)
 	}
 }
 
